@@ -230,10 +230,11 @@ def run_pipeline(
     ig_caption_path = date_dir / "ig_caption.txt"
     ig_caption_path.write_text(script.get("ig_caption", ""), encoding="utf-8")
 
-    # Voiceover (skip jika pakai audio YouTube — di-render dari footage langsung)
+    # Voiceover (skip jika audio_mode == "music_only")
     voiceover_path = date_dir / "voiceover.mp3"
     voiceover_script = script.get("script_voiceover", "")
-    if voiceover_script:
+    audio_mode = settings["pipeline"].get("audio_mode", "music_only")
+    if voiceover_script and audio_mode != "music_only":
         on_progress("Membuat voiceover", "voiceover", 45)
         generate_voiceover(
             voiceover_script,
@@ -242,7 +243,7 @@ def run_pipeline(
         )
     else:
         voiceover_path.write_bytes(b"")
-        on_progress("Audio dari footage YouTube", "voiceover", 45)
+        on_progress("Menggunakan musik latar (tanpa voiceover)", "voiceover", 45)
 
     footage_dir = date_dir / "footage"
     footage_keywords = script.get("keywords") or [script.get("title", "international news")]
