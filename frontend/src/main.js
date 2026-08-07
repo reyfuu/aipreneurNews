@@ -74,7 +74,7 @@ function setLatestPreview(item) {
     latestPreview.innerHTML = "";
     return;
   }
-  const videoSrc = `/api/outputs/${item.date}/${item.final_video.name}`;
+  const videoSrc = `/output/${item.date}/${item.final_video.name}`;
   const title = item.title || "Daily News Clip";
   latestPreview.style.display = "block";
   latestPreview.innerHTML = `
@@ -146,9 +146,9 @@ async function renderOutput(outputs) {
         <p>${escapeHtml(caption)}</p>
         <div class="hashtags">${hashtags.map((tag) => `<span>${tag}</span>`).join(" ")}</div>
       </div>
-      ${item.final_video ? `<div class="video-preview"><div class="video-filename-tag">📹 File: ${escapeHtml(item.final_video.name)}</div><video controls preload="metadata" src="/api/outputs/${item.date}/${item.final_video.name}" playsinline></video></div>` : ""}
+      ${item.final_video ? `<div class="video-preview"><div class="video-filename-tag">📹 File: ${escapeHtml(item.final_video.name)}</div><video controls preload="metadata" src="/output/${item.date}/${item.final_video.name}" playsinline></video></div>` : ""}
       <div class="thumb-wrap">
-        ${item.thumbnail ? `<img src="/api/outputs/${item.date}/${item.thumbnail.name}" alt="${escapeHtml(title)}" />` : ""}
+        ${item.thumbnail ? `<img src="/output/${item.date}/${item.thumbnail.name}" alt="${escapeHtml(title)}" />` : ""}
       </div>
       <div class="links"></div>
     `;

@@ -635,20 +635,10 @@ def render_video(
 
     overlay_clips: list = []
 
-    # ---- Layer 0: solid fallback ----
+    # ---- Layer 0: solid fallback background ----
     overlay_clips.append(ColorClip(target_size, color=(10, 10, 10)).with_duration(target_duration))
 
-    # ---- Layer 1: TEMPLATE 100% ----
-    if base_template.exists():
-        try:
-            template = _load_base_video(base_template, target_duration, target_size)
-            overlay_clips.append(template.with_opacity(1.0))
-        except Exception as exc:
-            logger.warning("Template gagal: %s", exc)
-    else:
-        overlay_clips.append(ColorClip(target_size, color=(40, 22, 53)).with_duration(target_duration))
-
-    # ---- Layer 2: Video footage di KOTAK PUTIH (Support multi-clip sequence) ----
+    # ---- Layer 1: Video footage di KOTAK PUTIH (Di belakang frame template) ----
     if paths:
         try:
             if len(paths) == 1:
@@ -682,6 +672,16 @@ def render_video(
                 overlay_clips.append(box)
         except Exception as exc:
             logger.warning("Footage box rendering gagal: %s", exc)
+
+    # ---- Layer 2: TEMPLATE BASE (Diletakkan DI ATAS footage agar frame transparan/lubang memperlihatkan video) ----
+    if base_template.exists():
+        try:
+            template = _load_base_video(base_template, target_duration, target_size)
+            overlay_clips.append(template.with_opacity(1.0))
+        except Exception as exc:
+            logger.warning("Template gagal: %s", exc)
+    else:
+        overlay_clips.append(ColorClip(target_size, color=(40, 22, 53)).with_duration(target_duration))
 
     # ---- Layer 3: readability gradient ----
     gradient = _readability_gradient(target_size, target_duration)
