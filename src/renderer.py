@@ -97,6 +97,22 @@ def _normalize_size(size):
     return None
 
 
+def _mask_white_box_transparent(frame):
+    """Cut out white box region (y=410..1087) as transparent RGBA hole."""
+    h, w = frame.shape[:2]
+    # Ensure 4-channel RGBA frame
+    if frame.shape[2] == 3:
+        rgba = np.dstack([frame, np.full((h, w), 255, dtype=np.uint8)])
+    else:
+        rgba = frame.copy()
+    
+    # White box bounds
+    y1, y2 = 410, min(h, 1087)
+    x1, x2 = 0, min(w, 1079)
+    rgba[y1:y2, x1:x2, 3] = 0  # Set alpha to 0 (transparent hole)
+    return rgba
+
+
 def _load_base_video(template_path, duration, target_size=None):
     if template_path.exists():
         try:
@@ -104,14 +120,16 @@ def _load_base_video(template_path, duration, target_size=None):
             target = max(1, int(duration))
             if not clip.duration or clip.duration <= 0:
                 base = clip.with_duration(target)
-                return _resize_fill_clip(base, target_size) if target_size else base
-            if clip.duration >= target:
-                clip = clip.subclipped(0, target)
-                return _resize_fill_clip(clip, target_size) if target_size else clip
-            repeat_count = max(2, math.ceil(target / clip.duration))
-            looped = concatenate_videoclips([clip] * repeat_count, method="compose")
-            loop = looped.subclipped(0, target)
-            return _resize_fill_clip(loop, target_size) if target_size else loop
+            elif clip.duration >= target:
+                base = clip.subclipped(0, target)
+            else:
+                repeat_count = max(2, math.ceil(target / clip.duration))
+                looped = concatenate_videoclips([clip] * repeat_count, method="compose")
+                base = looped.subclipped(0, target)
+            
+            resized = _resize_fill_clip(base, target_size) if target_size else base
+            # Cut transparent hole in template where white box is
+            return resized.image_transform(_mask_white_box_transparent)
         except Exception as exc:
             logger.warning("Template video gagal dimuat: %s", exc)
     fallback_size = target_size or _DEFAULT_CANVAS
@@ -638,17 +656,7 @@ def render_video(
     # ---- Layer 0: solid fallback background ----
     overlay_clips.append(ColorClip(target_size, color=(10, 10, 10)).with_duration(target_duration))
 
-    # ---- Layer 1: BASE TEMPLATE (1080x1920 background UI frame) ----
-    if base_template.exists():
-        try:
-            template = _load_base_video(base_template, target_duration, target_size)
-            overlay_clips.append(template.with_opacity(1.0))
-        except Exception as exc:
-            logger.warning("Template gagal: %s", exc)
-    else:
-        overlay_clips.append(ColorClip(target_size, color=(40, 22, 53)).with_duration(target_duration))
-
-    # ---- Layer 2: Video footage di KOTAK PUTIH (Diletakkan DI ATAS template tepat menutupi area kotak putih y=410) ----
+    # ---- Layer 1: Video footage di KOTAK PUTIH (Di belakang bingkai template berlubang transparan) ----
     if paths:
         try:
             if len(paths) == 1:
@@ -682,6 +690,16 @@ def render_video(
                 overlay_clips.append(box)
         except Exception as exc:
             logger.warning("Footage box rendering gagal: %s", exc)
+
+    # ---- Layer 2: BASE TEMPLATE (Dengan lubang transparan di area kotak putih y=410..1087) ----
+    if base_template.exists():
+        try:
+            template = _load_base_video(base_template, target_duration, target_size)
+            overlay_clips.append(template.with_opacity(1.0))
+        except Exception as exc:
+            logger.warning("Template gagal: %s", exc)
+    else:
+        overlay_clips.append(ColorClip(target_size, color=(40, 22, 53)).with_duration(target_duration))
 
     # ---- Layer 3: readability gradient ----
     gradient = _readability_gradient(target_size, target_duration)
