@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AIPreneur News Control</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <div id="app-title">AIPreneur News</div>
+          <p class="subtitle">@aipreneur.news_ · News Automation</p>
+        </div>
+      </header>
+      <h1>Control Center</h1>
+
+      <form id="run-form">
+        <label>
+          Skip Upload
+          <input type="checkbox" id="skipUpload" checked />
+        </label>
+        <label>
+          Tanggal Run (opsional)
+          <input type="text" id="runDate" placeholder="YYYY-MM-DD" />
+        </label>
+        <button type="submit">Jalankan Pipeline</button>
+      </form>
+
+      <section>
+        <h2>Status Task</h2>
+        <pre id="taskResult">Belum ada task.</pre>
+      </section>
+
+      <section>
+        <h2>Preview Video Terakhir</h2>
+        <div id="latestPreview" class="latest-preview" style="display:none;"></div>
+
+        <h2>Output Terakhir</h2>
+        <div id="outputList" class="grid"></div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

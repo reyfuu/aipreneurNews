@@ -1,0 +1,32 @@
+{
+  "feeds": [
+    {
+      "name": "TechCrunch AI",
+      "url": "https://techcrunch.com/category/artificial-intelligence/feed/"
+    },
+    {
+      "name": "The Verge AI",
+      "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"
+    },
+    {
+      "name": "Ars Technica AI",
+      "url": "https://feeds.arstechnica.com/arstechnica/ai"
+    },
+    {
+      "name": "VentureBeat AI",
+      "url": "https://feeds.feedburner.com/venturebeat/ai"
+    },
+    {
+      "name": "MIT Tech Review AI",
+      "url": "https://www.technologyreview.com/feed/ai/"
+    },
+    {
+      "name": "Wired AI",
+      "url": "https://www.wired.com/feed/tag/artificial-intelligence/rss"
+    },
+    {
+      "name": "ZDNet AI",
+      "url": "https://www.zdnet.com/topic/artificial-intelligence/rss.xml"
+    }
+  ]
+}

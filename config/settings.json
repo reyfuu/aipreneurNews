@@ -1,0 +1,36 @@
+  "timezone": "Asia/Jakarta",
+  "feeds": {
+    "feed_limit_per_source": 8,
+    "window_hours_min": 6,
+    "window_hours_max": 12,
+    "max_items_for_ai": 5
+  },
+  "pipeline": {
+    "target_video_duration_sec": 60,
+    "target_voice_duration_sec": 60,
+    "target_footage_count": 3,
+    "music_volume": 0.2,
+    "audio_mode": "voiceover_and_music",
+    "random_seed": 42
+  },
+  "upload": {
+    "enabled": false,
+    "category_id": "25",
+    "privacy_status": "public",
+    "token_cache": ".cache/youtube_token.json"
+  },
+  "scheduler": {
+    "mode": "local",
+    "time": "06:00",
+    "tz": "Asia/Jakarta"
+  },
+  "paths": {
+    "output_dir": "output",
+    "template_video": "new template.mp4",
+    "template_thumbnail": "templates/thumb_template.png",
+    "font_path": "templates/fonts/Montserrat-ExtraBold.ttf",
+    "background_music_dir": "assets/background_music",
+    "prompts_file": "config/prompts.txt",
+    "feeds_file": "config/feeds.json"
+  }
+}

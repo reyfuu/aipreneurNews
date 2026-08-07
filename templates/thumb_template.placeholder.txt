@@ -1,0 +1,1 @@
+Replace this file with thumbnail template image: templates/thumb_template.png (1280x720).

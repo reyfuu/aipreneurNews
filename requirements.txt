@@ -1,0 +1,16 @@
+feedparser
+anthropic
+edge-tts
+requests
+moviepy
+ffmpeg-python
+Pillow
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+python-dotenv
+python-dateutil
+schedule
+django
+yt-dlp
