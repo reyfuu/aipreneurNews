@@ -648,14 +648,40 @@ def render_video(
     else:
         overlay_clips.append(ColorClip(target_size, color=(40, 22, 53)).with_duration(target_duration))
 
-    # ---- Layer 2: YouTube video di KOTAK PUTIH (footage utuh + background blur) ----
-    if footage_clip:
-        footage_box = _footage_box_blurred(
-            footage_clip.with_duration(target_duration), WHITE_BOX["w"], WHITE_BOX["h"]
-        )
-        footage_box = footage_box.with_position((WHITE_BOX["x"], WHITE_BOX["y"]))
-        footage_box = _apply_fade(footage_box, fade_in=0.3, fade_out=0.4)
-        overlay_clips.append(footage_box)
+    # ---- Layer 2: Video footage di KOTAK PUTIH (Support multi-clip sequence) ----
+    if paths:
+        try:
+            if len(paths) == 1:
+                c = VideoFileClip(str(paths[0]))
+                c_dur = min(target_duration, int(c.duration)) if c.duration else target_duration
+                box = _footage_box_blurred(c.with_duration(c_dur), WHITE_BOX["w"], WHITE_BOX["h"])
+            else:
+                per_clip = max(3.0, target_duration / len(paths))
+                box_clips = []
+                for p in paths:
+                    try:
+                        c = VideoFileClip(str(p))
+                        clip_dur = min(per_clip, c.duration) if c.duration else per_clip
+                        box_c = _footage_box_blurred(c.with_duration(clip_dur), WHITE_BOX["w"], WHITE_BOX["h"])
+                        box_clips.append(box_c)
+                    except Exception as err:
+                        logger.warning("Gagal load clip %s: %s", p, err)
+                if box_clips:
+                    box = concatenate_videoclips(box_clips, method="compose")
+                    if box.duration and box.duration < target_duration:
+                        repeat = math.ceil(target_duration / box.duration)
+                        box = concatenate_videoclips([box] * repeat, method="compose").subclipped(0, target_duration)
+                    else:
+                        box = box.subclipped(0, target_duration)
+                else:
+                    box = None
+
+            if box is not None:
+                box = box.with_position((WHITE_BOX["x"], WHITE_BOX["y"]))
+                box = _apply_fade(box, fade_in=0.3, fade_out=0.4)
+                overlay_clips.append(box)
+        except Exception as exc:
+            logger.warning("Footage box rendering gagal: %s", exc)
 
     # ---- Layer 3: readability gradient ----
     gradient = _readability_gradient(target_size, target_duration)
