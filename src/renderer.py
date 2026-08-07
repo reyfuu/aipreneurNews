@@ -532,8 +532,10 @@ def _footage_box_blurred(clip, box_w, box_h, blur_radius=28, dim=0.82):
     """
     def _blur(frame):
         im = Image.fromarray(frame).filter(ImageFilter.GaussianBlur(radius=blur_radius))
-        arr = np.asarray(im).astype(np.float32) * dim  # slightly darken for contrast
-        return arr.clip(0, 255).astype("uint8")
+        arr = np.array(im, dtype=np.uint8)
+        if dim != 1.0:
+            arr = (arr.astype(np.float32) * dim).astype(np.uint8)
+        return arr
 
     background = _resize_to_box(clip, box_w, box_h).image_transform(_blur)
     # Inset the sharp footage so a blurred margin is always visible (framed-on-blur look).
