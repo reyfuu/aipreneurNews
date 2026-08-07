@@ -10,6 +10,6 @@ urlpatterns = [
     path("outputs/", views.outputs, name="outputs"),
     path("run/", views.run_pipeline, name="run"),
     path("task/<str:task_id>/", views.task_status, name="task"),
-    path("outputs/<str:folder>/<str:filename>", views.output_file, name="output-file"),
+    path("outputs/<str:folder>/<path:filename>", views.output_file, name="output-file"),
 ]
 
