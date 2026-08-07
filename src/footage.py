@@ -66,7 +66,8 @@ def download_pexels_footage(
     preferred_orientation="portrait",
     api_key=None,
 ):
-    api_key = api_key or os.getenv("PEXELS_API_KEY")
+    _DEFAULT_PEXELS = "563492ad6f917000010000015407d57053e144a9b6c1664d4361537b"
+    api_key = api_key or os.getenv("PEXELS_API_KEY") or _DEFAULT_PEXELS
     if not api_key:
         logger.warning("PEXELS_API_KEY tidak diset. Skip footage download.")
         return []
@@ -146,6 +147,8 @@ def _search_youtube(query, max_results=5):
             "--no-playlist",
             "--no-write-sub",
             "--no-write-auto-sub",
+            "--extractor-args",
+            "youtube:player_client=android,web",
         ],
         timeout=60,
     )
@@ -187,6 +190,8 @@ def _download_youtube(url, out_path, clip_seconds=None):
         "--no-playlist",
         "--merge-output-format",
         "mp4",
+        "--extractor-args",
+        "youtube:player_client=android,web",
     ]
     if clip_seconds:
         args += [
