@@ -135,11 +135,22 @@ async function renderOutput(outputs) {
     const title = meta?.title || "Daily News Clip";
     const caption = meta?.description || "Ringkasan berita harian terbaru.";
     const hashtags = buildHashtags(meta?.tags || []);
+    
+    // Format timestamp jam & tanggal dari file video
+    let timeLabel = parseDateLabel(item.date);
+    if (item.final_video?.mtime) {
+      const mDate = new Date(item.final_video.mtime);
+      if (!Number.isNaN(mDate.getTime())) {
+        const tStr = mDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        timeLabel = `${parseDateLabel(item.date)} pkl ${tStr} WIB`;
+      }
+    }
+
     const card = document.createElement("article");
     card.className = "card";
     card.innerHTML = `
       <div class="meta-strip">
-        <div class="meta-line">${escapeHtml(currentProfile.name)} · ${parseDateLabel(item.date)}</div>
+        <div class="meta-line">${escapeHtml(currentProfile.name)} · 🕒 Generated: ${escapeHtml(timeLabel)}</div>
       </div>
       <div class="caption">
         <h3 class="video-title">📌 ${escapeHtml(title)}</h3>

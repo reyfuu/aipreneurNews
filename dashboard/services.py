@@ -156,7 +156,7 @@ def get_outputs(limit: int = 20) -> list[dict[str, object]]:
     folders = [item for item in output_root.iterdir() if item.is_dir() and item.name[0].isdigit()]
     records = []
     for folder in sorted(folders, key=lambda item: item.name, reverse=True):
-        mp4_files = list(folder.glob("*.mp4"))
+        mp4_files = sorted(folder.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
         video_file = mp4_files[0] if mp4_files else (folder / "final_video.mp4")
         record = {
             "date": folder.name,

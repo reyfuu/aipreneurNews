@@ -278,7 +278,9 @@ def run_pipeline(
 
     # Render
     on_progress("Membuat video final", "render_video", 75)
-    video_filename = f"{slugify(selected_title)}.mp4" if selected_title else "final_video.mp4"
+    time_str = now.strftime("%H%M%S")
+    title_slug = slugify(selected_title) if selected_title else "news_video"
+    video_filename = f"{title_slug}_{time_str}.mp4"
     final_video = date_dir / video_filename
     render_video(
         script=script,
