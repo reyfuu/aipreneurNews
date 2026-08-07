@@ -1,9 +1,9 @@
 {
   "timezone": "Asia/Jakarta",
   "feeds": {
-    "feed_limit_per_source": 8,
-    "window_hours_min": 6,
-    "window_hours_max": 12,
+    "feed_limit_per_source": 10,
+    "window_hours_min": 0,
+    "window_hours_max": 72,
     "max_items_for_ai": 5
   },
   "pipeline": {
