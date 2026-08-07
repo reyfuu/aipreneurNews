@@ -142,11 +142,11 @@ async function renderOutput(outputs) {
         <div class="meta-line">${escapeHtml(currentProfile.name)} · ${parseDateLabel(item.date)}</div>
       </div>
       <div class="caption">
-        <h3>${escapeHtml(title)}</h3>
+        <h3 class="video-title">📌 ${escapeHtml(title)}</h3>
         <p>${escapeHtml(caption)}</p>
         <div class="hashtags">${hashtags.map((tag) => `<span>${tag}</span>`).join(" ")}</div>
       </div>
-      ${item.final_video ? `<div class="video-preview"><video controls preload="metadata" src="/api/outputs/${item.date}/${item.final_video.name}" playsinline></video></div>` : ""}
+      ${item.final_video ? `<div class="video-preview"><div class="video-filename-tag">📹 File: ${escapeHtml(item.final_video.name)}</div><video controls preload="metadata" src="/api/outputs/${item.date}/${item.final_video.name}" playsinline></video></div>` : ""}
       <div class="thumb-wrap">
         ${item.thumbnail ? `<img src="/api/outputs/${item.date}/${item.thumbnail.name}" alt="${escapeHtml(title)}" />` : ""}
       </div>

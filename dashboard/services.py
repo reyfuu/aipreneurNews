@@ -156,12 +156,14 @@ def get_outputs(limit: int = 20) -> list[dict[str, object]]:
     folders = [item for item in output_root.iterdir() if item.is_dir() and item.name[0].isdigit()]
     records = []
     for folder in sorted(folders, key=lambda item: item.name, reverse=True):
+        mp4_files = list(folder.glob("*.mp4"))
+        video_file = mp4_files[0] if mp4_files else (folder / "final_video.mp4")
         record = {
             "date": folder.name,
             "script_file": _build_file_entry(folder / "script.json"),
             "ig_caption_file": _build_file_entry(folder / "ig_caption.txt"),
             "voiceover": _build_file_entry(folder / "voiceover.mp3"),
-            "final_video": _build_file_entry(folder / "final_video.mp4"),
+            "final_video": _build_file_entry(video_file),
             "thumbnail": _build_file_entry(folder / "thumbnail.png"),
         }
         records.append(record)

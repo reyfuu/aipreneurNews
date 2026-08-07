@@ -58,12 +58,13 @@ def output_file(request: HttpRequest, folder: str, filename: str) -> FileRespons
     if request.method != "GET":
         raise Http404("method tidak diizinkan")
 
-    if filename not in {"script.json", "voiceover.mp3", "final_video.mp4", "thumbnail.png", "ig_caption.txt"}:
+    allowed_names = {"script.json", "voiceover.mp3", "final_video.mp4", "thumbnail.png", "ig_caption.txt"}
+    if filename not in allowed_names and not filename.endswith(".mp4"):
         raise Http404("file tidak diizinkan")
 
     path = Path("output") / folder / filename
     if not path.exists() or not path.is_file():
         raise Http404("file tidak ditemukan")
 
-    as_attachment = filename not in {"final_video.mp4"}
+    as_attachment = not filename.endswith(".mp4")
     return FileResponse(path.open("rb"), as_attachment=as_attachment, filename=path.name)
