@@ -49,6 +49,13 @@ def safe_truncate(value: str, limit: int, suffix: str = "...") -> str:
     return value[: max(0, limit - len(suffix))].rstrip() + suffix
 
 
+def slugify(value: str, max_len: int = 50) -> str:
+    import re
+    cleaned = re.sub(r"[^\w\s-]", "", value.lower()).strip()
+    slug = re.sub(r"[-\s]+", "_", cleaned)
+    return slug[:max_len].strip("_") or "news_video"
+
+
 def random_choice(items: Iterable[Path], seed: Optional[int] = None) -> Optional[Path]:
     choices = list(items)
     if not choices:

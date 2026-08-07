@@ -18,7 +18,7 @@ from .footage import download_news_video
 from .thumbnail import render_thumbnail
 from .tts import generate_voiceover
 from .uploader import upload_to_youtube
-from .utils import append_jsonl, ensure_dir, load_json, now_local, now_utc, setup_logger, write_json
+from .utils import append_jsonl, ensure_dir, load_json, now_local, now_utc, setup_logger, slugify, write_json
 
 
 logger = setup_logger("news_clip_bot")
@@ -277,7 +277,8 @@ def run_pipeline(
 
     # Render
     on_progress("Membuat video final", "render_video", 75)
-    final_video = date_dir / "final_video.mp4"
+    video_filename = f"{slugify(selected_title)}.mp4" if selected_title else "final_video.mp4"
+    final_video = date_dir / video_filename
     render_video(
         script=script,
         base_template=template_video,
