@@ -230,11 +230,12 @@ def run_pipeline(
     ig_caption_path = date_dir / "ig_caption.txt"
     ig_caption_path.write_text(script.get("ig_caption", ""), encoding="utf-8")
 
-    # Voiceover (skip jika audio_mode == "music_only")
+    # Voiceover hanya dibuat untuk mode yang memerlukannya.
     voiceover_path = date_dir / "voiceover.mp3"
     voiceover_script = script.get("script_voiceover", "")
     audio_mode = settings["pipeline"].get("audio_mode", "music_only")
-    if voiceover_script and audio_mode != "music_only":
+    voice_modes = {"voiceover_only", "voiceover_and_music"}
+    if voiceover_script and audio_mode in voice_modes:
         on_progress("Membuat voiceover", "voiceover", 45)
         generate_voiceover(
             voiceover_script,
@@ -273,7 +274,10 @@ def run_pipeline(
         preferred_orientation=footage_orientation,
     )
     music_dir = Path(settings["paths"]["background_music_dir"])
-    music_files = list(music_dir.glob("*.mp3")) if music_dir.exists() else []
+    music_files = [
+        path for pattern in ("*.mp3", "*.ogg", "*.wav")
+        for path in music_dir.glob(pattern)
+    ] if music_dir.exists() else []
     music_path = random.choice(music_files) if music_files else None
 
     # Render

@@ -1,0 +1,7 @@
+Title: Chill Beat
+Author: Maddy
+Source: https://commons.wikimedia.org/wiki/File:Chill_Beat.ogg
+License: CC0 1.0 Universal
+License URL: https://creativecommons.org/publicdomain/zero/1.0/
+Downloaded: 2026-08-08
+SHA-256: 0ebeaac7ed3e8fab0beb2a707d7e2eb048d673583d32d9dccba9a2be9f8e075b  assets/background_music/chill-beat-cc0.ogg
