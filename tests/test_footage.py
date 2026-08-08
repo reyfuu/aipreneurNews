@@ -159,9 +159,21 @@ class FootageAudioTest(TestCase):
     def test_search_adds_generic_ai_queries(self, search):
         self.assertIsNone(footage.search_and_download_news_video(title="AI news", out_dir=self.tmp))
         queries = [call.args[0] for call in search.call_args_list]
-        self.assertIn("viral AI", queries)
-        self.assertIn("artificial intelligence", queries)
-        self.assertIn("AI technology", queries)
+        expected = [
+            "viral AI",
+            "AI tools",
+            "AI tutorial",
+            "AI podcast",
+            "AI robots",
+            "AI demo",
+            "generative AI",
+            "ChatGPT",
+            "Claude AI",
+            "open source AI",
+            "artificial intelligence",
+        ]
+        generic = [query for query in queries if query in expected]
+        self.assertEqual(generic, expected)
 
     @mock.patch("src.footage._has_audible_audio", return_value=True)
     @mock.patch("src.footage._download_youtube")

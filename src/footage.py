@@ -329,7 +329,19 @@ def search_and_download_news_video(
         q = f"{kw} news"
         if q not in specific_queries:
             specific_queries.append(q)
-    generic_queries = ["viral AI", "artificial intelligence", "AI technology"]
+    generic_queries = [
+        "viral AI",
+        "AI tools",
+        "AI tutorial",
+        "AI podcast",
+        "AI robots",
+        "AI demo",
+        "generative AI",
+        "ChatGPT",
+        "Claude AI",
+        "open source AI",
+        "artificial intelligence",
+    ]
 
     match_words = _match_words(title, keywords)
 
