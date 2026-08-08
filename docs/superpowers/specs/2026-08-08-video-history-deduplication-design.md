@@ -32,10 +32,14 @@ Successful rows retain all current fields and add:
   "source_url": "https://publisher.example/story",
   "source_title": "Original feed title",
   "title_key": "normalized generated title",
-  "footage_provider": "youtube",
-  "footage_url": "https://www.youtube.com/watch?v=...",
-  "footage_file": "output/2026-08-08/footage/yt_123456.mp4",
-  "footage_sha256": "..."
+  "footage_items": [
+    {
+      "provider": "youtube",
+      "url": "https://www.youtube.com/watch?v=...",
+      "file": "output/2026-08-08/footage/yt_123456.mp4",
+      "sha256": "..."
+    }
+  ]
 }
 ```
 
@@ -62,8 +66,8 @@ If no feed candidates remain, return `no_new_content` before voiceover, footage 
 
 Build two exclusion sets from completed history:
 
-- exact normalized `footage_url` values;
-- `footage_sha256` values.
+- exact normalized footage `url` values from every `footage_items` entry;
+- footage `sha256` values from every `footage_items` entry.
 
 For backward compatibility, scan existing `output/*/footage/` files once per run and add their SHA-256 values to the hash exclusion set. This lets retained legacy footage participate even though older history rows did not store its URL.
 
@@ -73,7 +77,7 @@ During candidate selection:
 2. download the next eligible candidate using the existing rank order;
 3. hash the downloaded raw footage;
 4. if its hash is already used, delete that new duplicate file and continue;
-5. after audio validation succeeds, expose the selected provider, URL, file path, and hash to the pipeline for the final history row.
+5. after validation succeeds, expose each selected provider, URL, file path, and hash to the pipeline for the final history row.
 
 Pexels keeps its existing role when YouTube has no usable candidate. Its downloaded files are also checked by SHA-256. If candidates existed but every viable candidate was excluded only because it was already used, return `no_new_content` rather than rendering a repeated clip.
 
