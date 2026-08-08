@@ -33,6 +33,24 @@ class FootageAudioTest(TestCase):
 
         self.assertEqual(footage._search_youtube("viral AI")[0]["view_count"], 250000)
 
+    @mock.patch("src.footage._download_youtube")
+    @mock.patch("src.footage._run_ytdlp")
+    def test_malformed_view_count_normalizes_to_none_and_is_not_downloaded(self, run, download):
+        run.return_value = CompletedProcess(
+            [], 0,
+            json.dumps({
+                "title": "Viral AI clip",
+                "webpage_url": "https://example/viral",
+                "duration": 60,
+                "view_count": "invalid",
+            }) + "\n",
+            "",
+        )
+
+        self.assertIsNone(footage._search_youtube("viral AI")[0]["view_count"])
+        self.assertIsNone(footage.search_and_download_news_video(title="Viral AI", out_dir=self.tmp))
+        download.assert_not_called()
+
     @mock.patch("src.footage.subprocess.run")
     def test_audible_audio_passes_threshold(self, run):
         run.return_value = CompletedProcess([], 0, "", "max_volume: -12.4 dB\\n")

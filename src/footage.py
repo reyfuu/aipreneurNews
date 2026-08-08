@@ -312,7 +312,8 @@ def search_and_download_news_video(
 
     Kandidat dari semua query dikumpulkan lalu di-skor berdasarkan berapa banyak
     kata judul berita yang muncul di judul video; yang paling relevan dipilih
-    (tie-break: durasi terpendek). Sumber berita YouTube umumnya panjang, jadi
+    dengan urutan ranking: relevansi → prioritas query spesifik → views menurun →
+    durasi menaik. Sumber berita YouTube umumnya panjang, jadi
     max_duration longgar dan hanya potongan awal (clip_seconds) yang di-download.
     """
     out_dir = Path(out_dir) if out_dir else Path("output/footage")
