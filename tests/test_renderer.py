@@ -39,9 +39,9 @@ def _make_silent_clip_with_audio(path: Path, seconds: float = 2.0) -> None:
     )
 
 
-def _make_clip_with_tone(path: Path, seconds: float = 30.0) -> None:
+def _make_clip_with_tone(path: Path, seconds: float = 30.0, frequency: float = 440.0) -> None:
     def sine(t):
-        wave = 0.4 * np.sin(2 * np.pi * 440 * t)
+        wave = 0.4 * np.sin(2 * np.pi * frequency * t)
         if np.isscalar(t):
             return np.array([wave, wave])
         return np.column_stack((wave, wave))
@@ -53,9 +53,9 @@ def _make_clip_with_tone(path: Path, seconds: float = 30.0) -> None:
     )
 
 
-def _make_voiceover(path: Path, seconds: float = 2.0) -> None:
+def _make_voiceover(path: Path, seconds: float = 2.0, frequency: float = 440.0) -> None:
     def sine(t):
-        wave = 0.4 * np.sin(2 * np.pi * 440 * t)
+        wave = 0.4 * np.sin(2 * np.pi * frequency * t)
         if np.isscalar(t):
             return np.array([wave, wave])
         return np.column_stack((wave, wave))
@@ -107,7 +107,7 @@ class RenderVideoSmokeTest(TestCase):
             renderer.render_video(
                 script={"title": "Judul Berita Indonesia"},
                 base_template=TEMPLATE,
-                voiceover_path=self.tmp / "empty.mp3",
+                voiceover_path=music_path or footage,
                 footage_paths=[footage],
                 music_path=music_path,
                 out_path=self.tmp / "source-or-music.mp4",
@@ -180,14 +180,30 @@ class RenderVideoSmokeTest(TestCase):
 
     def test_source_or_music_uses_audible_footage(self):
         footage = self.tmp / "english.mp4"
+        music = self.tmp / "music.wav"
         _make_clip_with_tone(footage, seconds=30)
-        captured = self._capture_audio_render(footage, music_path=None)
-        self.assertGreater(float(np.max(np.abs(captured.get_frame(0.501)))), 0.01)
+        _make_voiceover(music, seconds=30, frequency=880)
+        with mock.patch.object(renderer, "_has_audible_audio", return_value=True) as audible, \
+                mock.patch.object(renderer, "_mix_audio", wraps=renderer._mix_audio) as mix:
+            captured = self._capture_audio_render(footage, music_path=music)
+        try:
+            audible.assert_called_once_with(footage)
+            mix.assert_not_called()
+            self.assertGreater(float(captured.get_frame(0.501)[0]), 0.1)
+        finally:
+            captured.close()
 
     def test_source_or_music_falls_back_to_music(self):
         footage = self.tmp / "silent.mp4"
         music = self.tmp / "music.wav"
         _make_silent_clip_with_audio(footage, seconds=30)
-        _make_voiceover(music)
-        captured = self._capture_audio_render(footage, music_path=music)
-        self.assertGreater(float(np.max(np.abs(captured.get_frame(0.501)))), 0.01)
+        _make_voiceover(music, seconds=30, frequency=880)
+        with mock.patch.object(renderer, "_has_audible_audio", return_value=False) as audible, \
+                mock.patch.object(renderer, "_mix_audio", wraps=renderer._mix_audio) as mix:
+            captured = self._capture_audio_render(footage, music_path=music)
+        try:
+            audible.assert_called_once_with(footage)
+            mix.assert_called_once_with(music, music, 30, 0.2, "music_only")
+            self.assertLess(float(captured.get_frame(0.501)[0]), -0.02)
+        finally:
+            captured.close()
