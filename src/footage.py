@@ -124,8 +124,9 @@ def download_pexels_footage(
         try:
             fd, name = mkstemp(prefix="pexels_", suffix=".mp4", dir=out_dir)
             out_path = Path(name)
-            os.close(fd)
+            reserved_fd = fd
             fd = None
+            os.close(reserved_fd)
             _download_file(url, out_path)
             downloaded.append(out_path)
             used.add(url)

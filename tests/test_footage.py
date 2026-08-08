@@ -277,6 +277,35 @@ class FootageAudioTest(TestCase):
         self.assertEqual(result, [])
         self.assertEqual(list(self.tmp.iterdir()), [])
 
+    @mock.patch("src.footage.os.close", side_effect=OSError("close interrupted"))
+    @mock.patch("src.footage.mkstemp")
+    @mock.patch("src.footage.requests.get")
+    def test_pexels_close_failure_consumes_descriptor_ownership_once(
+        self, get, reserve, close
+    ):
+        candidate = self.tmp / "reserved.mp4"
+        candidate.write_bytes(b"")
+        reserve.return_value = (42, str(candidate))
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {
+            "videos": [{
+                "video_files": [{
+                    "width": 1920,
+                    "height": 1080,
+                    "link": "https://videos.pexels.com/new.mp4",
+                }],
+            }],
+        }
+        get.return_value = response
+
+        result = footage.download_pexels_footage(
+            keywords=["AI"], count=1, out_dir=self.tmp
+        )
+
+        self.assertEqual(result, [])
+        self.assertFalse(candidate.exists())
+        close.assert_called_once_with(42)
+
     @mock.patch("src.footage._download_file")
     @mock.patch("src.footage.requests.get")
     @mock.patch("src.footage.search_and_download_news_video", return_value=None)
