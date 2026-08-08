@@ -450,19 +450,22 @@ def download_news_video(
     # Grab a bit more than the target so the renderer has room to subclip.
     clip_seconds = int(preferred_duration) + 30
 
-    video_path = search_and_download_news_video(
-        title=title,
-        keywords=kw_list,
-        out_dir=out_dir,
-        min_duration=15,
-        max_duration=3600,
-        clip_seconds=clip_seconds,
-        source_url=source_url,
-        audio_duration=preferred_duration,
-        used_footage_urls=used_footage_urls,
-        used_footage_hashes=used_footage_hashes,
-        selected_items=selected_items,
-    )
+    try:
+        video_path = search_and_download_news_video(
+            title=title,
+            keywords=kw_list,
+            out_dir=out_dir,
+            min_duration=15,
+            max_duration=3600,
+            clip_seconds=clip_seconds,
+            source_url=source_url,
+            audio_duration=preferred_duration,
+            used_footage_urls=used_footage_urls,
+            used_footage_hashes=used_footage_hashes,
+            selected_items=selected_items,
+        )
+    except NoNewFootage:
+        video_path = None
 
     if video_path:
         return [video_path]

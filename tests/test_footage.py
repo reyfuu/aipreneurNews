@@ -293,3 +293,24 @@ class FootageAudioTest(TestCase):
             )
 
         self.assertFalse(duplicate.exists())
+
+    @mock.patch("src.footage.download_pexels_footage")
+    @mock.patch(
+        "src.footage.search_and_download_news_video",
+        side_effect=footage.NoNewFootage("all YouTube footage candidates were already used"),
+    )
+    def test_download_falls_back_to_fresh_pexels_after_youtube_duplicates(self, search, pexels):
+        fresh = self.tmp / "fresh-pexels.mp4"
+        fresh.write_bytes(b"fresh Pexels bytes" * 800)
+        pexels.return_value = [fresh]
+        items = []
+
+        result = footage.download_news_video(title="AI", out_dir=self.tmp, selected_items=items)
+
+        self.assertEqual(result, [fresh])
+        self.assertEqual(items, [{
+            "provider": "pexels",
+            "url": "",
+            "file": str(fresh),
+            "sha256": sha256_file(fresh),
+        }])
