@@ -10,7 +10,13 @@ from pathlib import Path
 
 import requests
 
+from .content_history import normalize_url, sha256_file
+
 logger = logging.getLogger(__name__)
+
+
+class NoNewFootage(Exception):
+    """No eligible footage remains after duplicate filtering."""
 
 
 def _ytdlp_cmd():
@@ -307,6 +313,9 @@ def search_and_download_news_video(
     source_url=None,
     audio_duration=None,
     min_views=100_000,
+    used_footage_urls: set[str] | None = None,
+    used_footage_hashes: set[str] | None = None,
+    selected_items: list[dict] | None = None,
 ):
     """Cari video berita dari YouTube yang RELEVAN dengan judul, lalu download.
 
@@ -318,6 +327,8 @@ def search_and_download_news_video(
     """
     out_dir = Path(out_dir) if out_dir else Path("output/footage")
     out_dir.mkdir(parents=True, exist_ok=True)
+    used_urls = {normalize_url(url) for url in (used_footage_urls or set())}
+    used_hashes = set(used_footage_hashes or set())
 
     # Story-specific queries win tie-breaks over generic AI searches.
     specific_queries: list[str] = []
@@ -372,7 +383,13 @@ def search_and_download_news_video(
         len(candidates), best_score, sorted(match_words)[:6],
     )
 
+    excluded_by_history = False
+    ordinary_failure = False
     for v in candidates:
+        normalized_url = normalize_url(v["url"])
+        if normalized_url in used_urls:
+            excluded_by_history = True
+            continue
         logger.info(
             "Coba footage (skor %d, %d views, %ds): %s",
             v["score"], v["view_count"], v["duration"], v["title"][:60],
@@ -381,11 +398,26 @@ def search_and_download_news_video(
         video_path = _download_youtube(v["url"], out_dir / out_stem, clip_seconds=clip_seconds)
         if video_path and video_path.stat().st_size > 5000:
             if _has_audible_audio(video_path, duration=audio_duration):
+                digest = sha256_file(video_path)
+                if digest in used_hashes:
+                    video_path.unlink(missing_ok=True)
+                    excluded_by_history = True
+                    continue
+                if selected_items is not None:
+                    selected_items.append({
+                        "provider": "youtube",
+                        "url": normalized_url,
+                        "file": str(video_path),
+                        "sha256": digest,
+                    })
                 logger.info("Footage terpilih dengan audio (skor %d): %s", v["score"], video_path)
                 return video_path
             logger.info("Footage ditolak karena audio diam/tidak ada: %s", video_path)
             video_path.unlink(missing_ok=True)
+        ordinary_failure = True
 
+    if excluded_by_history and not ordinary_failure:
+        raise NoNewFootage("all YouTube footage candidates were already used")
     return None
 
 
@@ -399,6 +431,9 @@ def download_news_video(
     preferred_duration=60,
     pexels_api_key=None,
     preferred_orientation="portrait",
+    used_footage_urls: set[str] | None = None,
+    used_footage_hashes: set[str] | None = None,
+    selected_items: list[dict] | None = None,
 ):
     """
     Cari & download video berita dari berbagai sumber:
@@ -424,19 +459,41 @@ def download_news_video(
         clip_seconds=clip_seconds,
         source_url=source_url,
         audio_duration=preferred_duration,
+        used_footage_urls=used_footage_urls,
+        used_footage_hashes=used_footage_hashes,
+        selected_items=selected_items,
     )
 
     if video_path:
         return [video_path]
 
     logger.info("YouTube tidak menghasilkan video, fallback ke Pexels...")
-    return download_pexels_footage(
+    pexels_paths = download_pexels_footage(
         keywords=kw_list or ["news", "headline"],
         count=3,
         out_dir=out_dir,
         preferred_orientation=preferred_orientation,
         api_key=pexels_api_key,
     )
+    used_hashes = set(used_footage_hashes or set())
+    retained = []
+    for video_path in pexels_paths:
+        digest = sha256_file(video_path)
+        if digest in used_hashes:
+            video_path.unlink(missing_ok=True)
+            continue
+        retained.append(video_path)
+        used_hashes.add(digest)
+        if selected_items is not None:
+            selected_items.append({
+                "provider": "pexels",
+                "url": "",
+                "file": str(video_path),
+                "sha256": digest,
+            })
+    if pexels_paths and not retained:
+        raise NoNewFootage("all Pexels footage candidates were already used")
+    return retained
 
 
 # Legacy alias — keep backwards compat

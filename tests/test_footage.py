@@ -8,6 +8,7 @@ import numpy as np
 from moviepy import AudioClip
 
 from src import footage
+from src.content_history import sha256_file
 
 
 class FootageAudioTest(TestCase):
@@ -112,6 +113,50 @@ class FootageAudioTest(TestCase):
     @mock.patch("src.footage._has_audible_audio", return_value=True)
     @mock.patch("src.footage._download_youtube")
     @mock.patch("src.footage._search_youtube")
+    def test_search_skips_used_url_before_download(self, search, download, audible):
+        selected = self.tmp / "new.mp4"
+        selected.write_bytes(b"new video" * 800)
+        search.return_value = [
+            {"title": "Used AI", "url": "https://example/used", "duration": 60, "view_count": 900000},
+            {"title": "New AI", "url": "https://example/new", "duration": 60, "view_count": 800000},
+        ]
+        download.return_value = selected
+        items = []
+
+        result = footage.search_and_download_news_video(
+            title="AI", out_dir=self.tmp,
+            used_footage_urls={"https://example/used"}, selected_items=items,
+        )
+
+        self.assertEqual(result, selected)
+        self.assertEqual(download.call_args.args[0], "https://example/new")
+        self.assertEqual(items[0]["url"], "https://example/new")
+
+    @mock.patch("src.footage._has_audible_audio", return_value=True)
+    @mock.patch("src.footage._download_youtube")
+    @mock.patch("src.footage._search_youtube")
+    def test_search_deletes_duplicate_hash_and_tries_next(self, search, download, audible):
+        duplicate = self.tmp / "duplicate.mp4"
+        fresh = self.tmp / "fresh.mp4"
+        duplicate.write_bytes(b"same bytes" * 800)
+        fresh.write_bytes(b"fresh bytes" * 800)
+        search.return_value = [
+            {"title": "First", "url": "https://example/first", "duration": 60, "view_count": 900000},
+            {"title": "Second", "url": "https://example/second", "duration": 60, "view_count": 800000},
+        ]
+        download.side_effect = [duplicate, fresh]
+
+        result = footage.search_and_download_news_video(
+            title="AI", out_dir=self.tmp,
+            used_footage_hashes={sha256_file(duplicate)}, selected_items=[],
+        )
+
+        self.assertEqual(result, fresh)
+        self.assertFalse(duplicate.exists())
+
+    @mock.patch("src.footage._has_audible_audio", return_value=True)
+    @mock.patch("src.footage._download_youtube")
+    @mock.patch("src.footage._search_youtube")
     def test_search_requires_100k_views_and_prefers_more_views(self, search, download, audible):
         selected = self.tmp / "viral.mp4"
         selected.write_bytes(b"video" * 1200)
@@ -209,3 +254,42 @@ class FootageAudioTest(TestCase):
             [selected],
         )
         self.assertEqual(search.call_args.kwargs["audio_duration"], 42)
+
+    @mock.patch("src.footage.download_pexels_footage")
+    @mock.patch("src.footage.search_and_download_news_video", return_value=None)
+    def test_download_pexels_discards_duplicate_hash_and_records_fresh_item(self, search, pexels):
+        duplicate = self.tmp / "duplicate.mp4"
+        fresh = self.tmp / "fresh.mp4"
+        duplicate.write_bytes(b"same bytes" * 800)
+        fresh.write_bytes(b"fresh bytes" * 800)
+        pexels.return_value = [duplicate, fresh]
+        items = []
+
+        result = footage.download_news_video(
+            title="AI", out_dir=self.tmp,
+            used_footage_hashes={sha256_file(duplicate)}, selected_items=items,
+        )
+
+        self.assertEqual(result, [fresh])
+        self.assertFalse(duplicate.exists())
+        self.assertEqual(items, [{
+            "provider": "pexels",
+            "url": "",
+            "file": str(fresh),
+            "sha256": sha256_file(fresh),
+        }])
+
+    @mock.patch("src.footage.download_pexels_footage")
+    @mock.patch("src.footage.search_and_download_news_video", return_value=None)
+    def test_download_raises_when_all_pexels_hashes_are_used(self, search, pexels):
+        duplicate = self.tmp / "duplicate.mp4"
+        duplicate.write_bytes(b"same bytes" * 800)
+        pexels.return_value = [duplicate]
+
+        with self.assertRaises(footage.NoNewFootage):
+            footage.download_news_video(
+                title="AI", out_dir=self.tmp,
+                used_footage_hashes={sha256_file(duplicate)}, selected_items=[],
+            )
+
+        self.assertFalse(duplicate.exists())
