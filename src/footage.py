@@ -165,10 +165,20 @@ def _search_youtube(query, max_results=5):
         except (json.JSONDecodeError, ValueError):
             continue
         duration = info.get("duration") or 0
+        view_count = info.get("view_count")
+        try:
+            view_count = int(view_count) if view_count is not None else None
+        except (TypeError, ValueError):
+            view_count = None
         url = info.get("webpage_url") or info.get("url")
         title = info.get("title")
         if duration and url and title:
-            videos.append({"title": title, "url": url, "duration": int(duration)})
+            videos.append({
+                "title": title,
+                "url": url,
+                "duration": int(duration),
+                "view_count": view_count,
+            })
     return videos
 
 
@@ -296,6 +306,7 @@ def search_and_download_news_video(
     clip_seconds=90,
     source_url=None,
     audio_duration=None,
+    min_views=100_000,
 ):
     """Cari video berita dari YouTube yang RELEVAN dengan judul, lalu download.
 
@@ -307,33 +318,41 @@ def search_and_download_news_video(
     out_dir = Path(out_dir) if out_dir else Path("output/footage")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Most specific queries first (the story itself), generic keyword queries last.
-    queries: list[str] = []
-    focus = _focus_query(title)
+    # Story-specific queries win tie-breaks over generic AI searches.
+    specific_queries: list[str] = []
+    focus = _focus_query(title) or (title or "").strip()
     if focus:
-        queries.append(focus)
-        queries.append(f"{focus} news")
+        specific_queries.append(focus)
+        specific_queries.append(f"{focus} news")
     for kw in _rank_keywords(keywords)[:3]:
         q = f"{kw} news"
-        if q not in queries:
-            queries.append(q)
+        if q not in specific_queries:
+            specific_queries.append(q)
+    generic_queries = ["viral AI", "artificial intelligence", "AI technology"]
 
     match_words = _match_words(title, keywords)
 
     # Pool candidates across queries, de-duped by URL.
     pool: dict[str, dict] = {}
-    for query in queries:
-        for v in _search_youtube(query, max_results=8):
-            if not (min_duration <= v["duration"] <= max_duration):
-                continue
-            v["score"] = _relevance(v["title"], match_words)
-            pool.setdefault(v["url"], v)
+    for query_priority, query_group in enumerate((specific_queries, generic_queries)):
+        for query in query_group:
+            for v in _search_youtube(query, max_results=8):
+                if not (min_duration <= v["duration"] <= max_duration):
+                    continue
+                view_count = v.get("view_count")
+                if not isinstance(view_count, int) or view_count < min_views:
+                    continue
+                v["score"] = _relevance(v["title"], match_words)
+                v["query_priority"] = query_priority
+                pool.setdefault(v["url"], v)
 
     if not pool:
         return None
 
-    # Most relevant first; among equally relevant, prefer shorter clips.
-    candidates = sorted(pool.values(), key=lambda v: (-v["score"], v["duration"]))
+    candidates = sorted(
+        pool.values(),
+        key=lambda v: (-v["score"], v["query_priority"], -v["view_count"], v["duration"]),
+    )
     best_score = candidates[0]["score"]
     logger.info(
         "Footage kandidat: %d (skor tertinggi %d) untuk kata kunci %s",
@@ -341,7 +360,10 @@ def search_and_download_news_video(
     )
 
     for v in candidates:
-        logger.info("Coba footage (skor %d, %ds): %s", v["score"], v["duration"], v["title"][:60])
+        logger.info(
+            "Coba footage (skor %d, %d views, %ds): %s",
+            v["score"], v["view_count"], v["duration"], v["title"][:60],
+        )
         out_stem = f"yt_{hash(v['url']) % 1000000:06d}"
         video_path = _download_youtube(v["url"], out_dir / out_stem, clip_seconds=clip_seconds)
         if video_path and video_path.stat().st_size > 5000:
