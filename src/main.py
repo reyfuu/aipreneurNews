@@ -248,7 +248,6 @@ def run_pipeline(
     if not news:
         return _append_no_new_content(history_path, now, "all stories were already used", on_progress)
 
-    news_payload = [n.to_dict() for n in news]
 
     logger.info("Total berita valid: %d", len(news))
     on_progress(f"Menemukan {len(news)} berita", "fetch_news", 25)
@@ -256,8 +255,9 @@ def run_pipeline(
     selection = _generate_unique_script(news, prompts_file, history_index)
     if selection is None:
         return _append_no_new_content(history_path, now, "all stories were already used", on_progress)
-    script, selected_news, _remaining_news = selection
+    script, selected_news, candidate_news = selection
     on_progress("Naskah selesai dibuat", "generate_script", 35)
+    news_payload = [n.to_dict() for n in candidate_news]
 
     script_path = date_dir / "script.json"
     script["candidate_news"] = news_payload

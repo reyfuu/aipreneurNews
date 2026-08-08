@@ -158,6 +158,16 @@ class PipelineTest(TestCase):
         self.assertEqual(generate_script.call_count, 2)
         self.assertEqual([item.link for item in generate_script.call_args_list[1].args[0]], ["https://example/second"])
         self.assertEqual(result["source_url"], "https://example/second")
+        renderer_script = render_video.call_args.kwargs["script"]
+        self.assertEqual(renderer_script["candidate_news"], [{
+            "source": "Reuters",
+            "title": "Second story",
+            "summary": "Summary",
+            "link": "https://example/second",
+            "published": "2026-08-06T10:00:00",
+        }])
+        self.assertEqual(renderer_script["selected_index"], 0)
+        self.assertEqual(renderer_script["candidate_news"][renderer_script["selected_index"]]["link"], "https://example/second")
         render_video.assert_called_once()
 
     @mock.patch("src.main.append_jsonl")
