@@ -214,10 +214,14 @@ def _download_youtube(url, out_path, clip_seconds=None):
     return None
 
 
-def _audio_max_volume(path):
+def _audio_max_volume(path, duration=None):
     try:
+        command = ["ffmpeg", "-hide_banner", "-i", str(path)]
+        if duration is not None:
+            command += ["-t", str(duration)]
+        command += ["-af", "volumedetect", "-vn", "-f", "null", "-"]
         result = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-i", str(path), "-af", "volumedetect", "-vn", "-f", "null", "-"],
+            command,
             capture_output=True,
             text=True,
             timeout=60,
@@ -228,8 +232,8 @@ def _audio_max_volume(path):
     return float(match.group(1)) if match else None
 
 
-def _has_audible_audio(path, threshold_db=-50.0):
-    volume = _audio_max_volume(path)
+def _has_audible_audio(path, threshold_db=-50.0, duration=None):
+    volume = _audio_max_volume(path, duration=duration)
     return volume is not None and volume > threshold_db
 
 
@@ -291,6 +295,7 @@ def search_and_download_news_video(
     max_duration=3600,
     clip_seconds=90,
     source_url=None,
+    audio_duration=None,
 ):
     """Cari video berita dari YouTube yang RELEVAN dengan judul, lalu download.
 
@@ -340,7 +345,7 @@ def search_and_download_news_video(
         out_stem = f"yt_{hash(v['url']) % 1000000:06d}"
         video_path = _download_youtube(v["url"], out_dir / out_stem, clip_seconds=clip_seconds)
         if video_path and video_path.stat().st_size > 5000:
-            if _has_audible_audio(video_path):
+            if _has_audible_audio(video_path, duration=audio_duration):
                 logger.info("Footage terpilih dengan audio (skor %d): %s", v["score"], video_path)
                 return video_path
             logger.info("Footage ditolak karena audio diam/tidak ada: %s", video_path)
@@ -383,6 +388,7 @@ def download_news_video(
         max_duration=3600,
         clip_seconds=clip_seconds,
         source_url=source_url,
+        audio_duration=preferred_duration,
     )
 
     if video_path:
