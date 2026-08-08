@@ -37,7 +37,7 @@ class PipelineTest(TestCase):
     @mock.patch("src.main.render_thumbnail")
     @mock.patch("src.main.render_video")
     @mock.patch("src.main.upload_to_youtube")
-    @mock.patch("src.main.download_footage")
+    @mock.patch("src.main.download_news_video")
     @mock.patch("src.main.scrape_recent_news")
     @mock.patch("src.main.generate_script")
     @mock.patch("src.main.load_json")
@@ -118,7 +118,9 @@ class PipelineTest(TestCase):
         history = main.run_pipeline(skip_upload=True)
         date_dir = Path(output_dir) / "2026-08-06"
 
-        self.assertTrue((date_dir / "final_video.mp4").exists())
+        video_file = Path(history["video_file"])
+        self.assertTrue(video_file.exists(), f"video not written: {video_file}")
+        self.assertEqual(video_file.parent, date_dir)
         self.assertTrue((date_dir / "ig_caption.txt").exists())
         self.assertEqual((date_dir / "ig_caption.txt").read_text(encoding="utf-8").strip(), "Caption IG test")
         self.assertEqual(history["output_dir"], str(date_dir))

@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Optional
 import uuid
 
+from django.conf import settings
+
+
+def _output_root() -> Path:
+    return Path(settings.BASE_DIR) / "output"
 
 
 def _now_iso() -> str:
@@ -149,15 +154,23 @@ def get_tasks(limit: int = 20) -> list[dict]:
 
 
 def get_outputs(limit: int = 20) -> list[dict[str, object]]:
-    output_root = Path("output")
+    output_root = _output_root()
     if not output_root.exists():
         return []
 
     folders = [item for item in output_root.iterdir() if item.is_dir() and item.name[0].isdigit()]
+    def video_mtime(folder: Path) -> float:
+        canonical = folder / "final_video.mp4"
+        if canonical.exists():
+            return canonical.stat().st_mtime
+        mp4_files = list(folder.glob("*.mp4"))
+        return max((path.stat().st_mtime for path in mp4_files), default=0)
+
     records = []
-    for folder in sorted(folders, key=lambda item: item.name, reverse=True):
+    for folder in sorted(folders, key=video_mtime, reverse=True):
+        canonical_video = folder / "final_video.mp4"
         mp4_files = sorted(folder.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-        video_file = mp4_files[0] if mp4_files else (folder / "final_video.mp4")
+        video_file = canonical_video if canonical_video.exists() else (mp4_files[0] if mp4_files else canonical_video)
         record = {
             "date": folder.name,
             "script_file": _build_file_entry(folder / "script.json"),
@@ -180,4 +193,5 @@ def _build_file_entry(path: Path) -> dict[str, object] | None:
         "name": path.name,
         "size": path.stat().st_size,
         "mtime": datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(),
+        "version": path.stat().st_mtime_ns,
     }

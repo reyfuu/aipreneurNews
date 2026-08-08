@@ -14,6 +14,7 @@ from moviepy import (
     CompositeAudioClip,
     CompositeVideoClip,
     ColorClip,
+    ImageClip,
     TextClip,
     VideoFileClip,
     concatenate_audioclips,
@@ -97,20 +98,24 @@ def _normalize_size(size):
     return None
 
 
-def _mask_white_box_transparent(frame):
-    """Cut out white box region (y=410..1087) as transparent RGBA hole."""
-    h, w = frame.shape[:2]
-    # Ensure 4-channel RGBA frame
-    if frame.shape[2] == 3:
-        rgba = np.dstack([frame, np.full((h, w), 255, dtype=np.uint8)])
-    else:
-        rgba = frame.copy()
-    
-    # White box bounds
-    y1, y2 = 410, min(h, 1087)
-    x1, x2 = 0, min(w, 1079)
-    rgba[y1:y2, x1:x2, 3] = 0  # Set alpha to 0 (transparent hole)
-    return rgba
+# White box (footage area) bounds inside the 1080x1920 template.
+_WHITE_BOX_BOUNDS = {"x1": 0, "y1": 410, "x2": 1079, "y2": 1087}
+
+
+def _white_box_mask_clip(size, duration):
+    """MoviePy mask: 1 (opaque) everywhere, 0 (transparent) over the white box.
+
+    Attaching this as the template's mask makes the box a real see-through hole
+    so the footage behind it shows — a bare RGBA frame from image_transform does
+    NOT (MoviePy ignores the alpha channel), which is why the box rendered white.
+    """
+    w, h = size
+    arr = np.ones((h, w), dtype=float)
+    b = _WHITE_BOX_BOUNDS
+    y1, y2 = max(0, b["y1"]), min(h, b["y2"])
+    x1, x2 = max(0, b["x1"]), min(w, b["x2"])
+    arr[y1:y2, x1:x2] = 0.0
+    return ImageClip(arr, is_mask=True).with_duration(max(1, int(duration)))
 
 
 def _load_base_video(template_path, duration, target_size=None):
@@ -126,10 +131,11 @@ def _load_base_video(template_path, duration, target_size=None):
                 repeat_count = max(2, math.ceil(target / clip.duration))
                 looped = concatenate_videoclips([clip] * repeat_count, method="compose")
                 base = looped.subclipped(0, target)
-            
+
             resized = _resize_fill_clip(base, target_size) if target_size else base
-            # Cut transparent hole in template where white box is
-            return resized.image_transform(_mask_white_box_transparent)
+            size = target_size or resized.size
+            # Real transparent hole where the white box is, so footage shows through.
+            return resized.with_mask(_white_box_mask_clip(size, target))
         except Exception as exc:
             logger.warning("Template video gagal dimuat: %s", exc)
     fallback_size = target_size or _DEFAULT_CANVAS

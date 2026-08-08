@@ -67,6 +67,13 @@ function fitVideoFormat(videoElement) {
   videoElement.addEventListener("loadedmetadata", apply, { once: true });
 }
 
+function outputUrl(item, file) {
+  if (!item || !file) return "";
+  const baseUrl = `/api/outputs/${encodeURIComponent(item.date)}/${encodeURIComponent(file.name)}`;
+  const version = file.version ?? file.mtime;
+  return version ? `${baseUrl}?v=${encodeURIComponent(version)}` : baseUrl;
+}
+
 function setLatestPreview(item) {
   if (!latestPreview) return;
   if (!item || !item.final_video) {
@@ -74,7 +81,7 @@ function setLatestPreview(item) {
     latestPreview.innerHTML = "";
     return;
   }
-  const videoSrc = `/output/${item.date}/${item.final_video.name}`;
+  const videoSrc = outputUrl(item, item.final_video);
   const title = item.title || "Daily News Clip";
   latestPreview.style.display = "block";
   latestPreview.innerHTML = `
@@ -109,7 +116,7 @@ function formatElapsedValue(seconds) {
 async function loadScriptMeta(item) {
   if (!item.script_file) return null;
   try {
-    const scriptUrl = `/api/outputs/${item.date}/${item.script_file.name}`;
+    const scriptUrl = outputUrl(item, item.script_file);
     const resp = await fetch(scriptUrl);
     if (!resp.ok) return null;
     return await resp.json();
@@ -157,9 +164,9 @@ async function renderOutput(outputs) {
         <p>${escapeHtml(caption)}</p>
         <div class="hashtags">${hashtags.map((tag) => `<span>${tag}</span>`).join(" ")}</div>
       </div>
-      ${item.final_video ? `<div class="video-preview"><div class="video-filename-tag">📹 File: ${escapeHtml(item.final_video.name)}</div><video controls preload="metadata" src="/output/${item.date}/${item.final_video.name}" playsinline></video></div>` : ""}
+      ${item.final_video ? `<div class="video-preview"><div class="video-filename-tag">📹 File: ${escapeHtml(item.final_video.name)}</div><video controls preload="metadata" src="${escapeHtml(outputUrl(item, item.final_video))}" playsinline></video></div>` : ""}
       <div class="thumb-wrap">
-        ${item.thumbnail ? `<img src="/output/${item.date}/${item.thumbnail.name}" alt="${escapeHtml(title)}" />` : ""}
+        ${item.thumbnail ? `<img src="${escapeHtml(outputUrl(item, item.thumbnail))}" alt="${escapeHtml(title)}" />` : ""}
       </div>
       <div class="links"></div>
     `;
@@ -179,7 +186,7 @@ async function renderOutput(outputs) {
       if (!file) return;
       const link = document.createElement("a");
       const filename = file.name;
-      link.href = `/api/outputs/${item.date}/${filename}`;
+      link.href = outputUrl(item, file);
       link.target = "_blank";
       link.rel = "noopener";
       link.textContent = `Unduh ${filename}`;

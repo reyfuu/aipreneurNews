@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from django.conf import settings
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -62,9 +63,11 @@ def output_file(request: HttpRequest, folder: str, filename: str) -> FileRespons
     if filename not in allowed_names and not filename.endswith(".mp4"):
         raise Http404("file tidak diizinkan")
 
-    path = Path("output") / folder / filename
+    path = Path(settings.BASE_DIR) / "output" / folder / filename
     if not path.exists() or not path.is_file():
         raise Http404("file tidak ditemukan")
 
     as_attachment = not filename.endswith(".mp4")
-    return FileResponse(path.open("rb"), as_attachment=as_attachment, filename=path.name)
+    response = FileResponse(path.open("rb"), as_attachment=as_attachment, filename=path.name)
+    response["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+    return response
