@@ -466,7 +466,7 @@ def _synced_captions(text, duration, base_size):
 
 def _mix_audio(voiceover_path, music_path, duration, music_volume, audio_mode="voiceover_and_music"):
     tracks = []
-    if audio_mode != "music_only":
+    if audio_mode != "music_only" and voiceover_path and Path(voiceover_path).is_file():
         try:
             voice = AudioFileClip(str(voiceover_path))
             if voice.duration and voice.duration > duration:

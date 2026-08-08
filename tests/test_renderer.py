@@ -96,6 +96,13 @@ class RenderVideoSmokeTest(TestCase):
             )
         return out
 
+    def test_mix_audio_skips_empty_or_missing_voiceover_before_loading(self):
+        for voiceover_path in ("", self.tmp / "no_voiceover.mp3"):
+            with self.subTest(voiceover_path=voiceover_path), \
+                    mock.patch.object(renderer, "AudioFileClip", side_effect=OSError) as audio_file:
+                self.assertIsNone(renderer._mix_audio(voiceover_path, None, 30, 0.2))
+            audio_file.assert_not_called()
+
     def _capture_audio_render(self, footage, music_path):
         captured = {}
 
