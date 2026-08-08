@@ -39,6 +39,20 @@ def _make_silent_clip_with_audio(path: Path, seconds: float = 2.0) -> None:
     )
 
 
+def _make_clip_with_tone(path: Path, seconds: float = 30.0) -> None:
+    def sine(t):
+        wave = 0.4 * np.sin(2 * np.pi * 440 * t)
+        if np.isscalar(t):
+            return np.array([wave, wave])
+        return np.column_stack((wave, wave))
+
+    tone = AudioClip(sine, duration=seconds, fps=44100)
+    ColorClip((320, 240), color=(0, 200, 0)).with_duration(seconds).with_audio(tone).write_videofile(
+        str(path), fps=12, codec="libx264", audio_codec="aac", logger=None,
+        ffmpeg_params=["-pix_fmt", "yuv420p"],
+    )
+
+
 def _make_voiceover(path: Path, seconds: float = 2.0) -> None:
     def sine(t):
         wave = 0.4 * np.sin(2 * np.pi * 440 * t)
@@ -81,6 +95,26 @@ class RenderVideoSmokeTest(TestCase):
                 duration=30,
             )
         return out
+
+    def _capture_audio_render(self, footage, music_path):
+        captured = {}
+
+        def capture_write(clip, path, *args, **kwargs):
+            captured["audio"] = clip.audio
+            Path(path).write_bytes(b"stub-video")
+
+        with mock.patch.object(renderer.CompositeVideoClip, "write_videofile", new=capture_write):
+            renderer.render_video(
+                script={"title": "Judul Berita Indonesia"},
+                base_template=TEMPLATE,
+                voiceover_path=self.tmp / "empty.mp3",
+                footage_paths=[footage],
+                music_path=music_path,
+                out_path=self.tmp / "source-or-music.mp4",
+                audio_mode="source_or_music",
+                duration=30,
+            )
+        return captured["audio"]
 
     def test_renders_with_footage(self):
         """Full build with footage present completes and writes the output file."""
@@ -143,3 +177,17 @@ class RenderVideoSmokeTest(TestCase):
 
         sample = np.asarray(captured["audio"].get_frame(0.501))
         self.assertGreater(float(np.max(np.abs(sample))), 0.01)
+
+    def test_source_or_music_uses_audible_footage(self):
+        footage = self.tmp / "english.mp4"
+        _make_clip_with_tone(footage, seconds=30)
+        captured = self._capture_audio_render(footage, music_path=None)
+        self.assertGreater(float(np.max(np.abs(captured.get_frame(0.501)))), 0.01)
+
+    def test_source_or_music_falls_back_to_music(self):
+        footage = self.tmp / "silent.mp4"
+        music = self.tmp / "music.wav"
+        _make_silent_clip_with_audio(footage, seconds=30)
+        _make_voiceover(music)
+        captured = self._capture_audio_render(footage, music_path=music)
+        self.assertGreater(float(np.max(np.abs(captured.get_frame(0.501)))), 0.01)
