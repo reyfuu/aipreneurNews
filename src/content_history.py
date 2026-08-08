@@ -19,7 +19,7 @@ _TITLE_STOP_WORDS = {
 
 
 def normalize_url(value: str | None) -> str:
-    if not value:
+    if not isinstance(value, str) or not value:
         return ""
     parsed = urlsplit(value.strip())
     query = urlencode(sorted(
@@ -32,8 +32,10 @@ def normalize_url(value: str | None) -> str:
 
 
 def title_tokens(value: str | None) -> set[str]:
+    if not isinstance(value, str):
+        return set()
     return {
-        token for token in re.findall(r"[a-z0-9]+", (value or "").lower())
+        token for token in re.findall(r"[a-z0-9]+", value.lower())
         if token not in _TITLE_STOP_WORDS
     }
 
@@ -48,15 +50,18 @@ def titles_similar(left: str, right: str, threshold: float = 0.60) -> bool:
 @dataclass
 class HistoryIndex:
     source_urls: set[str] = field(default_factory=set)
-    titles: list[str] = field(default_factory=list)
+    title_keys: set[str] = field(default_factory=set)
+    legacy_titles: list[str] = field(default_factory=list)
     footage_urls: set[str] = field(default_factory=set)
     footage_hashes: set[str] = field(default_factory=set)
 
     def story_seen(self, source_url: str = "", title: str = "") -> bool:
         normalized = normalize_url(source_url)
+        title_key = " ".join(sorted(title_tokens(title)))
         return bool(
             (normalized and normalized in self.source_urls)
-            or (title and any(titles_similar(title, old) for old in self.titles))
+            or (title_key and title_key in self.title_keys)
+            or (title and any(titles_similar(title, old) for old in self.legacy_titles))
         )
 
     def footage_seen(self, url: str = "", digest: str = "") -> bool:
@@ -93,12 +98,28 @@ def load_history_index(history_path: Path, output_root: Path, logger=None) -> Hi
                     continue
                 if "status" in row and row["status"] != "completed":
                     continue
-                source_url = normalize_url(row.get("source_url"))
+                raw_source_url = row.get("source_url")
+                if raw_source_url is not None and not isinstance(raw_source_url, str):
+                    if logger:
+                        logger.warning("Skipping malformed source URL in history row %s", line_number)
+                    raw_source_url = ""
+                source_url = normalize_url(raw_source_url)
                 if source_url:
                     index.source_urls.add(source_url)
                 title = row.get("title")
-                if title:
-                    index.titles.append(title)
+                if title and not isinstance(title, str):
+                    if logger:
+                        logger.warning("Skipping malformed title in history row %s", line_number)
+                elif title and "source_url" not in row:
+                    index.legacy_titles.append(title)
+                raw_title_key = row.get("title_key")
+                if raw_title_key and not isinstance(raw_title_key, str):
+                    if logger:
+                        logger.warning("Skipping malformed title key in history row %s", line_number)
+                elif source_url and raw_title_key:
+                    title_key = " ".join(sorted(title_tokens(raw_title_key)))
+                    if title_key:
+                        index.title_keys.add(title_key)
                 footage_items = row.get("footage_items", [])
                 if not isinstance(footage_items, list):
                     if logger:
@@ -109,11 +130,19 @@ def load_history_index(history_path: Path, output_root: Path, logger=None) -> Hi
                         if logger:
                             logger.warning("Skipping malformed footage entry in history row %s", line_number)
                         continue
-                    footage_url = normalize_url(footage.get("url"))
+                    raw_footage_url = footage.get("url")
+                    if raw_footage_url is not None and not isinstance(raw_footage_url, str):
+                        if logger:
+                            logger.warning("Skipping malformed footage URL in history row %s", line_number)
+                        raw_footage_url = ""
+                    footage_url = normalize_url(raw_footage_url)
                     if footage_url:
                         index.footage_urls.add(footage_url)
                     digest = footage.get("sha256")
-                    if digest:
+                    if digest and not isinstance(digest, str):
+                        if logger:
+                            logger.warning("Skipping malformed footage hash in history row %s", line_number)
+                    elif digest:
                         index.footage_hashes.add(digest)
     for footage_path in Path(output_root).glob("*/footage/*"):
         if not footage_path.is_file():

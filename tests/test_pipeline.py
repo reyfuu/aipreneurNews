@@ -170,6 +170,64 @@ class PipelineTest(TestCase):
         self.assertEqual(renderer_script["candidate_news"][renderer_script["selected_index"]]["link"], "https://example/second")
         render_video.assert_called_once()
 
+    @mock.patch("src.main.render_thumbnail")
+    @mock.patch("src.main.render_video")
+    @mock.patch("src.main.download_news_video")
+    @mock.patch("src.main.generate_script")
+    @mock.patch("src.main.scrape_recent_news")
+    @mock.patch("src.main.load_json")
+    def test_pipeline_clamps_selected_index_for_renderer_source_and_history(
+        self, load_json, scrape_news, generate_script, download, render, thumbnail
+    ):
+        output_dir = Path(self.tmpdir) / "output"
+        run_date = "2026-08-06T10:00:00"
+        load_json.return_value = self._settings(output_dir)
+        scrape_news.return_value = [
+            _NewsItem("Reuters", "First source", "First summary", "https://example/first", datetime.now()),
+            _NewsItem("BBC", "Second source", "Second summary", "https://example/second", datetime.now()),
+        ]
+        generate_script.return_value = {
+            "selected_index": 99,
+            "title": "Fresh generated title",
+            "script_voiceover": "",
+            "keywords": [],
+            "thumbnail_text": "Fresh",
+            "description": "",
+            "tags": [],
+        }
+        footage_item = {
+            "provider": "pexels",
+            "url": "",
+            "file": str(Path(self.tmpdir) / "fresh.mp4"),
+            "sha256": "abc123",
+        }
+
+        def select_footage(*args, **kwargs):
+            kwargs["selected_items"].append(footage_item)
+            return [Path(footage_item["file"])]
+
+        download.side_effect = select_footage
+
+        result = main.run_pipeline(skip_upload=True, run_date=run_date)
+
+        renderer_script = render.call_args.kwargs["script"]
+        self.assertEqual(renderer_script["selected_index"], 0)
+        self.assertEqual(renderer_script["candidate_news"][0]["link"], "https://example/first")
+        self.assertEqual(result["source_url"], "https://example/first")
+        self.assertEqual(result["source_title"], "First source")
+        self.assertEqual(result["source"], "Reuters")
+        self.assertEqual(result["title_key"], "fresh generated title")
+        self.assertEqual(result["footage_items"], [footage_item])
+        persisted = json.loads(
+            (output_dir / "history.jsonl").read_text(encoding="utf-8").splitlines()[0]
+        )
+        self.assertEqual(persisted, result)
+        script_payload = json.loads(
+            (output_dir / "2026-08-06" / "script.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(script_payload["selected_index"], 0)
+        self.assertEqual(script_payload["candidate_news"][0]["link"], result["source_url"])
+
     @mock.patch("src.main.append_jsonl")
     @mock.patch("src.main.generate_voiceover")
     @mock.patch("src.main.render_thumbnail")
@@ -281,11 +339,19 @@ class PipelineTest(TestCase):
         history_path.parent.mkdir(parents=True)
         history_path.write_text('{"status":"completed","source_url":"https://example/used"}\n', encoding="utf-8")
         scrape_news.return_value = [_NewsItem("Reuters", "Used", "", "https://example/used", datetime.now())]
+        before_lines = history_path.read_text(encoding="utf-8").splitlines()
 
         result = main.run_pipeline(skip_upload=True, run_date="2026-08-06T10:00:00")
 
-        self.assertEqual(result["status"], "no_new_content")
-        self.assertEqual(json.loads(history_path.read_text(encoding="utf-8").splitlines()[-1])["reason"], "all stories were already used")
+        lines = history_path.read_text(encoding="utf-8").splitlines()
+        expected = {
+            "run_at": "2026-08-06T10:00:00+07:00",
+            "status": "no_new_content",
+            "reason": "all stories were already used",
+        }
+        self.assertEqual(result, expected)
+        self.assertEqual(len(lines), len(before_lines) + 1)
+        self.assertEqual(json.loads(lines[-1]), expected)
         render.assert_not_called()
         upload.assert_not_called()
         generate_script.assert_not_called()
@@ -305,8 +371,53 @@ class PipelineTest(TestCase):
         result = main.run_pipeline(skip_upload=True, run_date="2026-08-06T10:00:00")
         history_path = output_dir / "history.jsonl"
 
-        self.assertEqual(result["status"], "no_new_content")
-        self.assertEqual(json.loads(history_path.read_text(encoding="utf-8").splitlines()[-1])["reason"], "all footage was already used")
+        lines = history_path.read_text(encoding="utf-8").splitlines()
+        expected = {
+            "run_at": "2026-08-06T10:00:00+07:00",
+            "status": "no_new_content",
+            "reason": "all footage was already used",
+        }
+        self.assertEqual(result, expected)
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(json.loads(lines[0]), expected)
+        render.assert_not_called()
+        upload.assert_not_called()
+
+    @mock.patch("src.main.render_video")
+    @mock.patch("src.main.upload_to_youtube")
+    @mock.patch("src.main.generate_script")
+    @mock.patch("src.main.scrape_recent_news")
+    @mock.patch("src.main.load_json")
+    def test_pipeline_appends_one_exact_no_new_row_after_legacy_title_exhaustion(
+        self, load_json, scrape_news, generate_script, upload, render
+    ):
+        output_dir = Path(self.tmpdir) / "output"
+        load_json.return_value = self._settings(output_dir)
+        history_path = output_dir / "history.jsonl"
+        history_path.parent.mkdir(parents=True)
+        history_path.write_text(
+            '{"status":"completed","title":"OpenAI meluncurkan model coding baru"}\n',
+            encoding="utf-8",
+        )
+        scrape_news.return_value = [
+            _NewsItem("Reuters", "Fresh URL", "", "https://example/fresh", datetime.now())
+        ]
+        generate_script.return_value = {
+            "selected_index": 0,
+            "title": "OpenAI luncurkan model coding baru",
+        }
+
+        result = main.run_pipeline(skip_upload=True, run_date="2026-08-06T10:00:00")
+
+        expected = {
+            "run_at": "2026-08-06T10:00:00+07:00",
+            "status": "no_new_content",
+            "reason": "all stories were already used",
+        }
+        lines = history_path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(result, expected)
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(json.loads(lines[-1]), expected)
         render.assert_not_called()
         upload.assert_not_called()
 
@@ -331,6 +442,52 @@ class PipelineTest(TestCase):
         self.assertIn("upload offline", result["upload_error"])
         self.assertEqual(result["source_url"], "https://example/fresh")
         self.assertEqual(json.loads((output_dir / "history.jsonl").read_text(encoding="utf-8").splitlines()[-1])["upload_status"], "failed")
+
+    @mock.patch("src.main.render_thumbnail", side_effect=RuntimeError("thumbnail broken"))
+    @mock.patch("src.main.render_video")
+    @mock.patch("src.main.upload_to_youtube", return_value={"id": "uploaded-video"})
+    @mock.patch("src.main.download_news_video")
+    @mock.patch("src.main.generate_script")
+    @mock.patch("src.main.scrape_recent_news")
+    @mock.patch("src.main.load_json")
+    def test_pipeline_persists_rendered_identity_and_uploads_without_failed_thumbnail(
+        self, load_json, scrape_news, generate_script, download, upload, render, thumbnail
+    ):
+        output_dir = Path(self.tmpdir) / "output"
+        load_json.return_value = self._settings(output_dir, upload_enabled=True)
+        scrape_news.return_value = [
+            _NewsItem("Reuters", "Fresh source", "", "https://example/fresh", datetime.now())
+        ]
+        generate_script.return_value = {
+            "selected_index": 0,
+            "title": "Fresh title",
+            "script_voiceover": "",
+            "keywords": [],
+            "thumbnail_text": "Fresh",
+            "description": "",
+            "tags": [],
+        }
+        download.return_value = [Path(self.tmpdir) / "footage.mp4"]
+
+        first = main.run_pipeline(run_date="2026-08-06T10:00:00")
+
+        self.assertEqual(first["status"], "completed")
+        self.assertEqual(first["thumbnail_status"], "failed")
+        self.assertIn("thumbnail broken", first["thumbnail_error"])
+        self.assertIsNone(first["thumbnail_file"])
+        self.assertEqual(first["upload_status"], "uploaded")
+        self.assertIsNone(upload.call_args.kwargs["thumbnail_path"])
+        persisted = json.loads(
+            (output_dir / "history.jsonl").read_text(encoding="utf-8").splitlines()[0]
+        )
+        self.assertEqual(persisted, first)
+
+        second = main.run_pipeline(run_date="2026-08-06T10:00:00")
+
+        self.assertEqual(second["status"], "no_new_content")
+        self.assertEqual(generate_script.call_count, 1)
+        render.assert_called_once()
+        upload.assert_called_once()
 
     @mock.patch("src.main.upload_to_youtube")
     @mock.patch("src.main.render_video")

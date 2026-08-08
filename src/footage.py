@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import mkstemp
 
 import requests
 
@@ -118,12 +119,15 @@ def download_pexels_footage(
     for url in clip_urls:
         if len(downloaded) >= count:
             break
-        out_path = out_dir / f"footage_{len(downloaded)+1}.mp4"
+        fd, name = mkstemp(prefix="pexels_", suffix=".mp4", dir=out_dir)
+        os.close(fd)
+        out_path = Path(name)
         try:
             _download_file(url, out_path)
             downloaded.append(out_path)
             used.add(url)
         except Exception as exc:
+            out_path.unlink(missing_ok=True)
             logger.warning("Gagal download footage: %s", exc)
     return downloaded
 

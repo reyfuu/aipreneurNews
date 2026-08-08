@@ -255,6 +255,40 @@ class FootageAudioTest(TestCase):
         )
         self.assertEqual(search.call_args.kwargs["audio_duration"], 42)
 
+    @mock.patch("src.footage._download_file")
+    @mock.patch("src.footage.requests.get")
+    @mock.patch("src.footage.search_and_download_news_video", return_value=None)
+    def test_pexels_duplicate_never_overwrites_or_deletes_retained_file(
+        self, search, get, download_file
+    ):
+        retained = self.tmp / "footage_1.mp4"
+        retained_bytes = b"retained footage bytes"
+        retained.write_bytes(retained_bytes)
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {
+            "videos": [{
+                "video_files": [{
+                    "width": 1920,
+                    "height": 1080,
+                    "link": "https://videos.pexels.com/new.mp4",
+                }],
+            }],
+        }
+        get.return_value = response
+        download_file.side_effect = lambda _url, path: path.write_bytes(retained_bytes)
+
+        with self.assertRaises(footage.NoNewFootage):
+            footage.download_news_video(
+                title="AI",
+                out_dir=self.tmp,
+                used_footage_hashes={sha256_file(retained)},
+                selected_items=[],
+            )
+
+        self.assertTrue(retained.exists())
+        self.assertEqual(retained.read_bytes(), retained_bytes)
+        self.assertEqual(list(self.tmp.iterdir()), [retained])
+
     @mock.patch("src.footage.download_pexels_footage")
     @mock.patch("src.footage.search_and_download_news_video", return_value=None)
     def test_download_pexels_discards_duplicate_hash_and_records_fresh_item(self, search, pexels):

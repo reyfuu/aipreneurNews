@@ -162,6 +162,7 @@ def _generate_unique_script(news, prompts_file, history_index):
             selected_index = 0
         if not 0 <= selected_index < len(remaining):
             selected_index = 0
+        script["selected_index"] = selected_index
         selected_news = remaining[selected_index]
         if not history_index.story_seen(title=script.get("title", "")):
             return script, selected_news, remaining
@@ -345,12 +346,18 @@ def run_pipeline(
     # Thumbnail
     on_progress("Membuat thumbnail", "thumbnail", 90)
     thumb_path = date_dir / "thumbnail.png"
-    render_thumbnail(
-        text=script.get("thumbnail_text", "Berita Terbaru"),
-        template_path=template_thumb,
-        out_path=thumb_path,
-        font_path=settings["paths"].get("font_path"),
-    )
+    thumbnail_status = "created"
+    thumbnail_error = None
+    try:
+        render_thumbnail(
+            text=script.get("thumbnail_text", "Berita Terbaru"),
+            template_path=template_thumb,
+            out_path=thumb_path,
+            font_path=settings["paths"].get("font_path"),
+        )
+    except Exception as exc:
+        logger.error("Thumbnail gagal: %s", exc)
+        thumbnail_status, thumbnail_error = "failed", str(exc)
 
     source_name = selected_news.source
 
@@ -370,7 +377,7 @@ def run_pipeline(
                 token_cache=upload_cfg.get("token_cache", ".cache/youtube_token.json"),
                 category_id=upload_cfg.get("category_id", "25"),
                 privacy_status=upload_cfg.get("privacy_status", "public"),
-                thumbnail_path=thumb_path,
+                thumbnail_path=thumb_path if thumbnail_status == "created" else None,
             )
             youtube_id = response.get("id")
             upload_status = "uploaded"
@@ -387,7 +394,8 @@ def run_pipeline(
         "script_file": str(script_path),
         "ig_caption_file": str(ig_caption_path),
         "video_file": str(final_video),
-        "thumbnail_file": str(thumb_path),
+        "thumbnail_file": str(thumb_path) if thumbnail_status == "created" else None,
+        "thumbnail_status": thumbnail_status,
         "source_url": selected_news.link,
         "source_title": selected_news.title,
         "title_key": " ".join(sorted(title_tokens(script.get("title", "")))),
@@ -395,6 +403,7 @@ def run_pipeline(
         "video_id": youtube_id,
         "title": script.get("title"),
         "source": source_name,
+        **({"thumbnail_error": thumbnail_error} if thumbnail_error else {}),
         **({"upload_error": upload_error} if upload_error else {}),
     }
     append_jsonl(history_path, history)
