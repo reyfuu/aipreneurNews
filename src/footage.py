@@ -214,6 +214,25 @@ def _download_youtube(url, out_path, clip_seconds=None):
     return None
 
 
+def _audio_max_volume(path):
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-i", str(path), "-af", "volumedetect", "-vn", "-f", "null", "-"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", result.stderr)
+    return float(match.group(1)) if match else None
+
+
+def _has_audible_audio(path, threshold_db=-50.0):
+    volume = _audio_max_volume(path)
+    return volume is not None and volume > threshold_db
+
+
 _MATCH_STOPWORDS = {
     "news", "update", "video", "latest", "breaking", "report", "reportedly",
     "says", "said", "this", "that", "with", "from", "your", "will", "have",
@@ -321,8 +340,11 @@ def search_and_download_news_video(
         out_stem = f"yt_{hash(v['url']) % 1000000:06d}"
         video_path = _download_youtube(v["url"], out_dir / out_stem, clip_seconds=clip_seconds)
         if video_path and video_path.stat().st_size > 5000:
-            logger.info("Footage terpilih (skor %d): %s", v["score"], video_path)
-            return video_path
+            if _has_audible_audio(video_path):
+                logger.info("Footage terpilih dengan audio (skor %d): %s", v["score"], video_path)
+                return video_path
+            logger.info("Footage ditolak karena audio diam/tidak ada: %s", video_path)
+            video_path.unlink(missing_ok=True)
 
     return None
 
