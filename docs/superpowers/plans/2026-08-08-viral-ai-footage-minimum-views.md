@@ -4,7 +4,7 @@
 
 **Goal:** Hanya download footage YouTube bertema AI dengan sedikitnya 100.000 views, sambil mempertahankan fallback Pexels + musik CC0.
 
-**Architecture:** Metadata `view_count` yang sudah disediakan yt-dlp dipertahankan oleh `_search_youtube`. `search_and_download_news_video` menambahkan query AI umum, menyaring kandidat sebelum download, lalu mengurutkan kandidat berdasarkan relevansi dan views tanpa API atau dependency baru.
+**Architecture:** Metadata `view_count` yang sudah disediakan yt-dlp dipertahankan oleh `_search_youtube`. `search_and_download_news_video` menambahkan query AI umum, menyaring kandidat sebelum download, lalu mengurutkan kandidat berdasarkan relevansi, prioritas query berita spesifik, views, dan durasi tanpa API atau dependency baru.
 
 **Tech Stack:** Python 3.10+, stdlib, yt-dlp JSON metadata, Django test runner.
 
@@ -138,17 +138,40 @@ def test_search_adds_generic_ai_queries(self, search):
     self.assertIn("viral AI", queries)
     self.assertIn("artificial intelligence", queries)
     self.assertIn("AI technology", queries)
+
+
+@mock.patch("src.footage._has_audible_audio", return_value=True)
+@mock.patch("src.footage._download_youtube")
+@mock.patch("src.footage._search_youtube")
+def test_specific_search_wins_equal_relevance_before_generic_views(self, search, download, audible):
+    selected = self.tmp / "specific.mp4"
+    selected.write_bytes(b"video" * 1200)
+
+    def results(query, max_results=8):
+        if query == "viral AI":
+            return [{"title": "AI clip", "url": "https://example/generic", "duration": 60, "view_count": 900000}]
+        if query in {"artificial intelligence", "AI technology"}:
+            return []
+        return [{"title": "AI clip", "url": "https://example/specific", "duration": 60, "view_count": 100000}]
+
+    search.side_effect = results
+    download.return_value = selected
+
+    result = footage.search_and_download_news_video(title="AI news", out_dir=self.tmp)
+
+    self.assertEqual(result, selected)
+    self.assertEqual(download.call_args.args[0], "https://example/specific")
 ```
 
 - [ ] **Step 5: Run focused tests and verify RED**
 
-Run: `.venv/bin/python manage.py test tests.test_footage.FootageAudioTest.test_search_requires_100k_views_and_prefers_more_views tests.test_footage.FootageAudioTest.test_search_accepts_exactly_100k_views tests.test_footage.FootageAudioTest.test_search_rejects_low_or_missing_views_before_download tests.test_footage.FootageAudioTest.test_search_adds_generic_ai_queries -v 2`
+Run: `.venv/bin/python manage.py test tests.test_footage.FootageAudioTest.test_search_requires_100k_views_and_prefers_more_views tests.test_footage.FootageAudioTest.test_search_accepts_exactly_100k_views tests.test_footage.FootageAudioTest.test_search_rejects_low_or_missing_views_before_download tests.test_footage.FootageAudioTest.test_search_adds_generic_ai_queries tests.test_footage.FootageAudioTest.test_specific_search_wins_equal_relevance_before_generic_views -v 2`
 
 Expected: FAIL because candidates are not filtered/ranked by views and generic AI queries do not exist.
 
 - [ ] **Step 6: Implement the minimal filter and ranking**
 
-Add the parameter and generic queries:
+Add the parameter and keep specific and generic queries as separate priority groups:
 
 ```python
 def search_and_download_news_video(
@@ -162,24 +185,28 @@ def search_and_download_news_video(
     audio_duration=None,
     min_views=100_000,
 ):
-    # existing setup
-    for query in ("viral AI", "artificial intelligence", "AI technology"):
-        if query not in queries:
-            queries.append(query)
+    # existing setup builds specific_queries
+    generic_queries = ["viral AI", "artificial intelligence", "AI technology"]
 ```
 
-Filter before adding to `pool` and include views in the tie-break:
+Search both groups, filter before adding to `pool`, and record which group found the candidate:
 
 ```python
-view_count = v.get("view_count")
-if not isinstance(view_count, int) or view_count < min_views:
-    continue
-v["score"] = _relevance(v["title"], match_words)
-pool.setdefault(v["url"], v)
+for query_priority, query_group in enumerate((specific_queries, generic_queries)):
+    for query in query_group:
+        for v in _search_youtube(query, max_results=8):
+            if not (min_duration <= v["duration"] <= max_duration):
+                continue
+            view_count = v.get("view_count")
+            if not isinstance(view_count, int) or view_count < min_views:
+                continue
+            v["score"] = _relevance(v["title"], match_words)
+            v["query_priority"] = query_priority
+            pool.setdefault(v["url"], v)
 
 candidates = sorted(
     pool.values(),
-    key=lambda v: (-v["score"], -v["view_count"], v["duration"]),
+    key=lambda v: (-v["score"], v["query_priority"], -v["view_count"], v["duration"]),
 )
 ```
 
