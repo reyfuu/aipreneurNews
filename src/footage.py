@@ -119,16 +119,29 @@ def download_pexels_footage(
     for url in clip_urls:
         if len(downloaded) >= count:
             break
-        fd, name = mkstemp(prefix="pexels_", suffix=".mp4", dir=out_dir)
-        os.close(fd)
-        out_path = Path(name)
+        fd = None
+        out_path = None
         try:
+            fd, name = mkstemp(prefix="pexels_", suffix=".mp4", dir=out_dir)
+            out_path = Path(name)
+            os.close(fd)
+            fd = None
             _download_file(url, out_path)
             downloaded.append(out_path)
             used.add(url)
         except Exception as exc:
-            out_path.unlink(missing_ok=True)
+            if out_path is not None:
+                try:
+                    out_path.unlink(missing_ok=True)
+                except OSError as cleanup_exc:
+                    logger.warning("Gagal membersihkan footage sementara: %s", cleanup_exc)
             logger.warning("Gagal download footage: %s", exc)
+        finally:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError as cleanup_exc:
+                    logger.warning("Gagal menutup footage sementara: %s", cleanup_exc)
     return downloaded
 
 

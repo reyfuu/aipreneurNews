@@ -255,6 +255,28 @@ class FootageAudioTest(TestCase):
         )
         self.assertEqual(search.call_args.kwargs["audio_duration"], 42)
 
+    @mock.patch("src.footage.mkstemp", side_effect=PermissionError("read-only output"))
+    @mock.patch("src.footage.requests.get")
+    def test_pexels_tempfile_reservation_failure_returns_no_footage(self, get, reserve):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {
+            "videos": [{
+                "video_files": [{
+                    "width": 1920,
+                    "height": 1080,
+                    "link": "https://videos.pexels.com/new.mp4",
+                }],
+            }],
+        }
+        get.return_value = response
+
+        result = footage.download_pexels_footage(
+            keywords=["AI"], count=1, out_dir=self.tmp
+        )
+
+        self.assertEqual(result, [])
+        self.assertEqual(list(self.tmp.iterdir()), [])
+
     @mock.patch("src.footage._download_file")
     @mock.patch("src.footage.requests.get")
     @mock.patch("src.footage.search_and_download_news_video", return_value=None)
