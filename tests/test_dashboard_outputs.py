@@ -1,10 +1,12 @@
 import os
 import tempfile
 from pathlib import Path
-from unittest import TestCase
+from unittest import mock
+import django
+from django.test import Client, TestCase, override_settings
 
-from django.test import Client
-from django.test import override_settings
+if not django.apps.apps.ready:
+    django.setup()
 
 from dashboard import services
 
@@ -52,7 +54,8 @@ class DashboardOutputsTest(TestCase):
             original_cwd = Path.cwd()
             os.chdir(cwd_dir)
             try:
-                with override_settings(BASE_DIR=project_root):
+                os.chdir(project_root)
+                with override_settings(ALLOWED_HOSTS=["testserver", "*"]):
                     response = Client().get("/api/outputs/2026-08-08/final_video.mp4")
             finally:
                 os.chdir(original_cwd)
