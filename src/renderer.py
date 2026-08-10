@@ -22,6 +22,8 @@ from moviepy import (
     vfx,
 )
 
+from src.footage import _has_audible_audio
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CANVAS = (1080, 1920)
@@ -464,7 +466,8 @@ def _synced_captions(text, duration, base_size):
 
 def _mix_audio(voiceover_path, music_path, duration, music_volume, audio_mode="voiceover_and_music"):
     tracks = []
-    if audio_mode != "music_only":
+    voiceover = Path(voiceover_path) if voiceover_path else None
+    if audio_mode != "music_only" and voiceover and voiceover.is_file() and voiceover.stat().st_size > 0:
         try:
             voice = AudioFileClip(str(voiceover_path))
             if voice.duration and voice.duration > duration:
@@ -764,11 +767,24 @@ def render_video(
         composed = composed.with_duration(target_duration)
 
     # ---- Audio mengikuti mode pipeline; audio footage tidak menimpa voiceover ----
-    audio = _mix_audio(
-        voiceover_path, music_path, target_duration, music_volume, audio_mode
-    )
+    if audio_mode == "source_or_music":
+        audio = None
+        if footage_clip and footage_clip.audio and paths and _has_audible_audio(paths[0], duration=target_duration):
+            end = min(target_duration, footage_clip.audio.duration or target_duration)
+            audio = footage_clip.audio.subclipped(0, end).with_volume_scaled(1.0)
+        if audio is None:
+            audio = _mix_audio(
+                voiceover_path, music_path, target_duration, music_volume, "music_only"
+            )
+    else:
+        audio = _mix_audio(
+            voiceover_path, music_path, target_duration, music_volume, audio_mode
+        )
     if audio is not None:
         composed = composed.with_audio(audio)
+    else:
+        composed = composed.without_audio()
+        logger.warning("Tidak ada audio valid; render dilanjutkan tanpa audio")
 
     fps = 30
     composed.write_videofile(

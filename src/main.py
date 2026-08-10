@@ -6,15 +6,17 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from functools import wraps
 
 import random
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
 from .ai_writer import AIWriterError, generate_script, get_default_script
+from .content_history import load_history_index, pipeline_lock, title_tokens
 from .renderer import render_video
 from .scraper import scrape_recent_news
-from .footage import download_news_video
+from .footage import NoNewFootage, download_news_video
 from .thumbnail import render_thumbnail
 from .tts import generate_voiceover
 from .uploader import upload_to_youtube
@@ -141,6 +143,54 @@ def _parse_size(value: object) -> tuple[int, int] | None:
     return (width, height)
 
 
+def _generate_unique_script(news, prompts_file, history_index):
+    remaining = list(news)
+    while remaining:
+        try:
+            script = generate_script(
+                remaining,
+                str(prompts_file),
+                api_key=os.getenv("ANTHROPIC_API_KEY"),
+                model=os.getenv("ANTHROPIC_MODEL", "cc/claude-opus-4-7"),
+            )
+        except Exception as exc:
+            logger.warning("AI gagal (%s), fallback script lokal dipakai.", exc)
+            script = get_default_script(remaining, str(prompts_file))
+        try:
+            selected_index = int(script.get("selected_index", 0))
+        except (TypeError, ValueError):
+            selected_index = 0
+        if not 0 <= selected_index < len(remaining):
+            selected_index = 0
+        script["selected_index"] = selected_index
+        selected_news = remaining[selected_index]
+        if not history_index.story_seen(title=script.get("title", "")):
+            return script, selected_news, remaining
+        logger.info("Lewati topik yang sudah pernah dibuat: %s", script.get("title", ""))
+        remaining.pop(selected_index)
+    return None
+
+
+def _append_no_new_content(history_path, now, reason, on_progress):
+    row = {"run_at": now.isoformat(), "status": "no_new_content", "reason": reason}
+    append_jsonl(history_path, row)
+    on_progress("Tidak ada konten baru", "no_new_content", 100)
+    return row
+
+
+def _serialized_pipeline(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        settings = load_json(Path("config/settings.json"))
+        output_root = Path(settings["paths"]["output_dir"])
+        with pipeline_lock(output_root / "pipeline.lock") as acquired:
+            if not acquired:
+                return {"status": "already_running"}
+            return func(*args, **kwargs)
+    return wrapped
+
+
+@_serialized_pipeline
 def run_pipeline(
     *,
     skip_upload: bool = False,
@@ -155,6 +205,7 @@ def run_pipeline(
 
     settings = load_json(Path("config/settings.json"))
     output_root = Path(settings["paths"]["output_dir"])
+    history_path = output_root / "history.jsonl"
     feeds_file = Path(settings["paths"]["feeds_file"])
     prompts_file = Path(settings["paths"]["prompts_file"])
     template_video = Path(settings["paths"]["template_video"])
@@ -193,33 +244,25 @@ def run_pipeline(
             "Cek feed/timezone, atau ubah window di config/ settings.json"
         )
 
-    news_payload = [n.to_dict() for n in news]
+    history_index = load_history_index(history_path, output_root, logger=logger)
+    news = [item for item in news if not history_index.story_seen(source_url=item.link)]
+    if not news:
+        return _append_no_new_content(history_path, now, "all stories were already used", on_progress)
+
 
     logger.info("Total berita valid: %d", len(news))
     on_progress(f"Menemukan {len(news)} berita", "fetch_news", 25)
 
-    try:
-        script = generate_script(
-            news,
-            str(prompts_file),
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model=os.getenv("ANTHROPIC_MODEL", "cc/claude-opus-4-7"),
-        )
-    except Exception as exc:
-        logger.warning("AI gagal (%s), fallback script lokal dipakai.", exc)
-        script = get_default_script(news, str(prompts_file))
-        on_progress("AI gagal, memakai template naskah fallback", "generate_script", 35)
-    else:
-        on_progress("Naskah selesai dibuat", "generate_script", 35)
+    selection = _generate_unique_script(news, prompts_file, history_index)
+    if selection is None:
+        return _append_no_new_content(history_path, now, "all stories were already used", on_progress)
+    script, selected_news, candidate_news = selection
+    on_progress("Naskah selesai dibuat", "generate_script", 35)
+    news_payload = [n.to_dict() for n in candidate_news]
 
     script_path = date_dir / "script.json"
     script["candidate_news"] = news_payload
     script["created_at"] = now_utc().isoformat()
-    try:
-        source_idx = int(script.get("selected_index", 0))
-    except (TypeError, ValueError):
-        source_idx = 0
-    selected_news = news[source_idx] if 0 <= source_idx < len(news) else news[0]
     script["keywords"] = _merge_keywords(
         list(script.get("keywords", []) or []),
         selected_news_title=getattr(selected_news, "title", ""),
@@ -230,11 +273,12 @@ def run_pipeline(
     ig_caption_path = date_dir / "ig_caption.txt"
     ig_caption_path.write_text(script.get("ig_caption", ""), encoding="utf-8")
 
-    # Voiceover (skip jika audio_mode == "music_only")
+    # Voiceover hanya dibuat untuk mode yang memerlukannya.
     voiceover_path = date_dir / "voiceover.mp3"
     voiceover_script = script.get("script_voiceover", "")
     audio_mode = settings["pipeline"].get("audio_mode", "music_only")
-    if voiceover_script and audio_mode != "music_only":
+    voice_modes = {"voiceover_only", "voiceover_and_music"}
+    if voiceover_script and audio_mode in voice_modes:
         on_progress("Membuat voiceover", "voiceover", 45)
         generate_voiceover(
             voiceover_script,
@@ -254,26 +298,29 @@ def run_pipeline(
     if output_size and output_size[0] > output_size[1]:
         footage_orientation = "landscape"
 
-    selected_title = script.get("title", "")
-    selected_url = ""
-    try:
-        src_idx = int(script.get("selected_index", 0))
-        if 0 <= src_idx < len(news):
-            selected_url = news[src_idx].link
-    except (TypeError, ValueError):
-        pass
+    selected_title, selected_url = script.get("title", ""), selected_news.link
 
+    selected_items = []
     on_progress("Mencari video berita", "download_footage", 55)
-    footage_paths = download_news_video(
-        title=selected_title,
-        keywords=footage_keywords,
-        source_url=selected_url,
-        out_dir=footage_dir,
-        preferred_duration=settings["pipeline"].get("target_video_duration_sec", 60),
-        preferred_orientation=footage_orientation,
-    )
+    try:
+        footage_paths = download_news_video(
+            title=selected_title,
+            keywords=footage_keywords,
+            source_url=selected_url,
+            out_dir=footage_dir,
+            preferred_duration=settings["pipeline"].get("target_video_duration_sec", 60),
+            preferred_orientation=footage_orientation,
+            used_footage_urls=history_index.footage_urls,
+            used_footage_hashes=history_index.footage_hashes,
+            selected_items=selected_items,
+        )
+    except NoNewFootage:
+        return _append_no_new_content(history_path, now, "all footage was already used", on_progress)
     music_dir = Path(settings["paths"]["background_music_dir"])
-    music_files = list(music_dir.glob("*.mp3")) if music_dir.exists() else []
+    music_files = [
+        path for pattern in ("*.mp3", "*.ogg", "*.wav")
+        for path in music_dir.glob(pattern)
+    ] if music_dir.exists() else []
     music_path = random.choice(music_files) if music_files else None
 
     # Render
@@ -299,61 +346,67 @@ def run_pipeline(
     # Thumbnail
     on_progress("Membuat thumbnail", "thumbnail", 90)
     thumb_path = date_dir / "thumbnail.png"
-    render_thumbnail(
-        text=script.get("thumbnail_text", "Berita Terbaru"),
-        template_path=template_thumb,
-        out_path=thumb_path,
-        font_path=settings["paths"].get("font_path"),
-    )
-
-    source_idx = script.get("selected_index", 0)
+    thumbnail_status = "created"
+    thumbnail_error = None
     try:
-        source_idx = int(source_idx)
-    except (TypeError, ValueError):
-        source_idx = 0
-    source_name = None
-    if 0 <= source_idx < len(news):
-        source_name = news[source_idx].source
+        render_thumbnail(
+            text=script.get("thumbnail_text", "Berita Terbaru"),
+            template_path=template_thumb,
+            out_path=thumb_path,
+            font_path=settings["paths"].get("font_path"),
+        )
+    except Exception as exc:
+        logger.error("Thumbnail gagal: %s", exc)
+        thumbnail_status, thumbnail_error = "failed", str(exc)
+
+    source_name = selected_news.source
 
     youtube_id = None
-    should_upload = (
-        not skip_upload
-        and (
-            settings.get("upload", {}).get("enabled", False)
-            or os.getenv("YT_FORCE_UPLOAD", "").strip().lower()
-            in {"1", "true", "yes", "y"}
-        )
-    )
-
-    if should_upload:
+    upload_status = "skipped"
+    upload_error = None
+    if not skip_upload and settings.get("upload", {}).get("enabled", False):
         on_progress("Upload ke YouTube", "upload", 95)
         upload_cfg = settings["upload"]
-        response = upload_to_youtube(
-            video_path=final_video,
-            title=script.get("title", "Daily News Clip"),
-            description=script.get("description", ""),
-            tags=script.get("tags", []),
-            client_secrets=os.getenv("YT_CLIENT_SECRETS", "config/client_secret.json"),
-            token_cache=upload_cfg.get("token_cache", ".cache/youtube_token.json"),
-            category_id=upload_cfg.get("category_id", "25"),
-            privacy_status=upload_cfg.get("privacy_status", "public"),
-            thumbnail_path=thumb_path,
-        )
-        youtube_id = response.get("id")
+        try:
+            response = upload_to_youtube(
+                video_path=final_video,
+                title=script.get("title", "Daily News Clip"),
+                description=script.get("description", ""),
+                tags=script.get("tags", []),
+                client_secrets=os.getenv("YT_CLIENT_SECRETS", "config/client_secret.json"),
+                token_cache=upload_cfg.get("token_cache", ".cache/youtube_token.json"),
+                category_id=upload_cfg.get("category_id", "25"),
+                privacy_status=upload_cfg.get("privacy_status", "public"),
+                thumbnail_path=thumb_path if thumbnail_status == "created" else None,
+            )
+            youtube_id = response.get("id")
+            upload_status = "uploaded"
+        except Exception as exc:
+            logger.error("Upload YouTube gagal: %s", exc)
+            upload_status, upload_error = "failed", str(exc)
     on_progress("Menyimpan riwayat output", "finalizing", 98)
 
     history = {
+        "status": "completed",
         "run_at": now.isoformat(),
+        "upload_status": upload_status,
         "output_dir": str(date_dir),
         "script_file": str(script_path),
         "ig_caption_file": str(ig_caption_path),
         "video_file": str(final_video),
-        "thumbnail_file": str(thumb_path),
+        "thumbnail_file": str(thumb_path) if thumbnail_status == "created" else None,
+        "thumbnail_status": thumbnail_status,
+        "source_url": selected_news.link,
+        "source_title": selected_news.title,
+        "title_key": " ".join(sorted(title_tokens(script.get("title", "")))),
+        "footage_items": selected_items,
         "video_id": youtube_id,
         "title": script.get("title"),
         "source": source_name,
+        **({"thumbnail_error": thumbnail_error} if thumbnail_error else {}),
+        **({"upload_error": upload_error} if upload_error else {}),
     }
-    append_jsonl(Path("output/history.jsonl"), history)
+    append_jsonl(history_path, history)
 
     logger.info("Pipeline selesai. Video: %s", final_video)
     return history

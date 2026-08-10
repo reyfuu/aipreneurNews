@@ -39,9 +39,23 @@ def _make_silent_clip_with_audio(path: Path, seconds: float = 2.0) -> None:
     )
 
 
-def _make_voiceover(path: Path, seconds: float = 2.0) -> None:
+def _make_clip_with_tone(path: Path, seconds: float = 30.0, frequency: float = 440.0) -> None:
     def sine(t):
-        wave = 0.4 * np.sin(2 * np.pi * 440 * t)
+        wave = 0.4 * np.sin(2 * np.pi * frequency * t)
+        if np.isscalar(t):
+            return np.array([wave, wave])
+        return np.column_stack((wave, wave))
+
+    tone = AudioClip(sine, duration=seconds, fps=44100)
+    ColorClip((320, 240), color=(0, 200, 0)).with_duration(seconds).with_audio(tone).write_videofile(
+        str(path), fps=12, codec="libx264", audio_codec="aac", logger=None,
+        ffmpeg_params=["-pix_fmt", "yuv420p"],
+    )
+
+
+def _make_voiceover(path: Path, seconds: float = 2.0, frequency: float = 440.0) -> None:
+    def sine(t):
+        wave = 0.4 * np.sin(2 * np.pi * frequency * t)
         if np.isscalar(t):
             return np.array([wave, wave])
         return np.column_stack((wave, wave))
@@ -81,6 +95,37 @@ class RenderVideoSmokeTest(TestCase):
                 duration=30,
             )
         return out
+
+    def test_mix_audio_skips_empty_or_missing_voiceover_before_loading(self):
+        empty_voiceover = self.tmp / "empty.mp3"
+        empty_voiceover.write_bytes(b"")
+        for voiceover_path in ("", self.tmp / "no_voiceover.mp3", empty_voiceover):
+            with self.subTest(voiceover_path=voiceover_path), \
+                    mock.patch.object(renderer, "AudioFileClip", side_effect=OSError) as audio_file:
+                self.assertIsNone(renderer._mix_audio(voiceover_path, None, 30, 0.2))
+            audio_file.assert_not_called()
+
+    def _capture_audio_render(self, footage, music_path):
+        captured = {}
+        empty_voiceover = self.tmp / "empty.mp3"
+        empty_voiceover.write_bytes(b"")
+
+        def capture_write(clip, path, *args, **kwargs):
+            captured["audio"] = clip.audio
+            Path(path).write_bytes(b"stub-video")
+
+        with mock.patch.object(renderer.CompositeVideoClip, "write_videofile", new=capture_write):
+            renderer.render_video(
+                script={"title": "Judul Berita Indonesia"},
+                base_template=TEMPLATE,
+                voiceover_path=empty_voiceover,
+                footage_paths=[footage],
+                music_path=music_path,
+                out_path=self.tmp / "source-or-music.mp4",
+                audio_mode="source_or_music",
+                duration=30,
+            )
+        return captured["audio"]
 
     def test_renders_with_footage(self):
         """Full build with footage present completes and writes the output file."""
@@ -143,3 +188,42 @@ class RenderVideoSmokeTest(TestCase):
 
         sample = np.asarray(captured["audio"].get_frame(0.501))
         self.assertGreater(float(np.max(np.abs(sample))), 0.01)
+
+    def test_source_or_music_uses_audible_footage(self):
+        footage = self.tmp / "english.mp4"
+        music = self.tmp / "music.wav"
+        _make_clip_with_tone(footage, seconds=30)
+        _make_voiceover(music, seconds=30, frequency=880)
+        with mock.patch.object(renderer, "_has_audible_audio", return_value=True) as audible, \
+                mock.patch.object(renderer, "_mix_audio", wraps=renderer._mix_audio) as mix:
+            captured = self._capture_audio_render(footage, music_path=music)
+        try:
+            audible.assert_called_once_with(footage, duration=30)
+            mix.assert_not_called()
+            self.assertGreater(float(captured.get_frame(0.501)[0]), 0.1)
+        finally:
+            captured.close()
+
+    def test_source_or_music_falls_back_to_music(self):
+        footage = self.tmp / "silent.mp4"
+        music = self.tmp / "music.wav"
+        _make_silent_clip_with_audio(footage, seconds=30)
+        _make_voiceover(music, seconds=30, frequency=880)
+        with mock.patch.object(renderer, "_has_audible_audio", return_value=False) as audible, \
+                mock.patch.object(renderer, "_mix_audio", wraps=renderer._mix_audio) as mix:
+            captured = self._capture_audio_render(footage, music_path=music)
+        try:
+            audible.assert_called_once_with(footage, duration=30)
+            mix.assert_called_once_with(self.tmp / "empty.mp3", music, 30, 0.2, "music_only")
+            self.assertLess(float(captured.get_frame(0.501)[0]), -0.02)
+        finally:
+            captured.close()
+
+    def test_source_or_music_has_no_implicit_audio_without_valid_source_or_music(self):
+        footage = self.tmp / "rejected.mp4"
+        _make_clip_with_tone(footage, seconds=30)
+
+        with mock.patch.object(renderer, "_has_audible_audio", return_value=False):
+            captured = self._capture_audio_render(footage, music_path=None)
+
+        self.assertIsNone(captured)

@@ -7,10 +7,17 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import mkstemp
 
 import requests
 
+from .content_history import normalize_url, sha256_file
+
 logger = logging.getLogger(__name__)
+
+
+class NoNewFootage(Exception):
+    """No eligible footage remains after duplicate filtering."""
 
 
 def _ytdlp_cmd():
@@ -112,13 +119,30 @@ def download_pexels_footage(
     for url in clip_urls:
         if len(downloaded) >= count:
             break
-        out_path = out_dir / f"footage_{len(downloaded)+1}.mp4"
+        fd = None
+        out_path = None
         try:
+            fd, name = mkstemp(prefix="pexels_", suffix=".mp4", dir=out_dir)
+            out_path = Path(name)
+            reserved_fd = fd
+            fd = None
+            os.close(reserved_fd)
             _download_file(url, out_path)
             downloaded.append(out_path)
             used.add(url)
         except Exception as exc:
+            if out_path is not None:
+                try:
+                    out_path.unlink(missing_ok=True)
+                except OSError as cleanup_exc:
+                    logger.warning("Gagal membersihkan footage sementara: %s", cleanup_exc)
             logger.warning("Gagal download footage: %s", exc)
+        finally:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError as cleanup_exc:
+                    logger.warning("Gagal menutup footage sementara: %s", cleanup_exc)
     return downloaded
 
 
@@ -165,10 +189,20 @@ def _search_youtube(query, max_results=5):
         except (json.JSONDecodeError, ValueError):
             continue
         duration = info.get("duration") or 0
+        view_count = info.get("view_count")
+        try:
+            view_count = int(view_count) if view_count is not None else None
+        except (TypeError, ValueError):
+            view_count = None
         url = info.get("webpage_url") or info.get("url")
         title = info.get("title")
         if duration and url and title:
-            videos.append({"title": title, "url": url, "duration": int(duration)})
+            videos.append({
+                "title": title,
+                "url": url,
+                "duration": int(duration),
+                "view_count": view_count,
+            })
     return videos
 
 
@@ -212,6 +246,29 @@ def _download_youtube(url, out_path, clip_seconds=None):
     if found:
         return found[0]
     return None
+
+
+def _audio_max_volume(path, duration=None):
+    try:
+        command = ["ffmpeg", "-hide_banner", "-i", str(path)]
+        if duration is not None:
+            command += ["-t", str(duration)]
+        command += ["-af", "volumedetect", "-vn", "-f", "null", "-"]
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", result.stderr)
+    return float(match.group(1)) if match else None
+
+
+def _has_audible_audio(path, threshold_db=-50.0, duration=None):
+    volume = _audio_max_volume(path, duration=duration)
+    return volume is not None and volume > threshold_db
 
 
 _MATCH_STOPWORDS = {
@@ -272,58 +329,113 @@ def search_and_download_news_video(
     max_duration=3600,
     clip_seconds=90,
     source_url=None,
+    audio_duration=None,
+    min_views=100_000,
+    used_footage_urls: set[str] | None = None,
+    used_footage_hashes: set[str] | None = None,
+    selected_items: list[dict] | None = None,
 ):
     """Cari video berita dari YouTube yang RELEVAN dengan judul, lalu download.
 
     Kandidat dari semua query dikumpulkan lalu di-skor berdasarkan berapa banyak
     kata judul berita yang muncul di judul video; yang paling relevan dipilih
-    (tie-break: durasi terpendek). Sumber berita YouTube umumnya panjang, jadi
+    dengan urutan ranking: relevansi → prioritas query spesifik → views menurun →
+    durasi menaik. Sumber berita YouTube umumnya panjang, jadi
     max_duration longgar dan hanya potongan awal (clip_seconds) yang di-download.
     """
     out_dir = Path(out_dir) if out_dir else Path("output/footage")
     out_dir.mkdir(parents=True, exist_ok=True)
+    used_urls = {normalize_url(url) for url in (used_footage_urls or set())}
+    used_hashes = set(used_footage_hashes or set())
 
-    # Most specific queries first (the story itself), generic keyword queries last.
-    queries: list[str] = []
-    focus = _focus_query(title)
+    # Story-specific queries win tie-breaks over generic AI searches.
+    specific_queries: list[str] = []
+    focus = _focus_query(title) or (title or "").strip()
     if focus:
-        queries.append(focus)
-        queries.append(f"{focus} news")
+        specific_queries.append(focus)
+        specific_queries.append(f"{focus} news")
     for kw in _rank_keywords(keywords)[:3]:
         q = f"{kw} news"
-        if q not in queries:
-            queries.append(q)
+        if q not in specific_queries:
+            specific_queries.append(q)
+    generic_queries = [
+        "viral AI",
+        "AI tools",
+        "AI tutorial",
+        "AI podcast",
+        "AI robots",
+        "AI demo",
+        "generative AI",
+        "ChatGPT",
+        "Claude AI",
+        "open source AI",
+        "artificial intelligence",
+    ]
 
     match_words = _match_words(title, keywords)
 
     # Pool candidates across queries, de-duped by URL.
     pool: dict[str, dict] = {}
-    for query in queries:
-        for v in _search_youtube(query, max_results=8):
-            if not (min_duration <= v["duration"] <= max_duration):
-                continue
-            v["score"] = _relevance(v["title"], match_words)
-            pool.setdefault(v["url"], v)
+    for query_priority, query_group in enumerate((specific_queries, generic_queries)):
+        for query in query_group:
+            for v in _search_youtube(query, max_results=8):
+                if not (min_duration <= v["duration"] <= max_duration):
+                    continue
+                view_count = v.get("view_count")
+                if not isinstance(view_count, int) or view_count < min_views:
+                    continue
+                v["score"] = _relevance(v["title"], match_words)
+                v["query_priority"] = query_priority
+                pool.setdefault(v["url"], v)
 
     if not pool:
         return None
 
-    # Most relevant first; among equally relevant, prefer shorter clips.
-    candidates = sorted(pool.values(), key=lambda v: (-v["score"], v["duration"]))
+    candidates = sorted(
+        pool.values(),
+        key=lambda v: (-v["score"], v["query_priority"], -v["view_count"], v["duration"]),
+    )
     best_score = candidates[0]["score"]
     logger.info(
         "Footage kandidat: %d (skor tertinggi %d) untuk kata kunci %s",
         len(candidates), best_score, sorted(match_words)[:6],
     )
 
+    excluded_by_history = False
+    ordinary_failure = False
     for v in candidates:
-        logger.info("Coba footage (skor %d, %ds): %s", v["score"], v["duration"], v["title"][:60])
+        normalized_url = normalize_url(v["url"])
+        if normalized_url in used_urls:
+            excluded_by_history = True
+            continue
+        logger.info(
+            "Coba footage (skor %d, %d views, %ds): %s",
+            v["score"], v["view_count"], v["duration"], v["title"][:60],
+        )
         out_stem = f"yt_{hash(v['url']) % 1000000:06d}"
         video_path = _download_youtube(v["url"], out_dir / out_stem, clip_seconds=clip_seconds)
         if video_path and video_path.stat().st_size > 5000:
-            logger.info("Footage terpilih (skor %d): %s", v["score"], video_path)
-            return video_path
+            if _has_audible_audio(video_path, duration=audio_duration):
+                digest = sha256_file(video_path)
+                if digest in used_hashes:
+                    video_path.unlink(missing_ok=True)
+                    excluded_by_history = True
+                    continue
+                if selected_items is not None:
+                    selected_items.append({
+                        "provider": "youtube",
+                        "url": normalized_url,
+                        "file": str(video_path),
+                        "sha256": digest,
+                    })
+                logger.info("Footage terpilih dengan audio (skor %d): %s", v["score"], video_path)
+                return video_path
+            logger.info("Footage ditolak karena audio diam/tidak ada: %s", video_path)
+            video_path.unlink(missing_ok=True)
+        ordinary_failure = True
 
+    if excluded_by_history and not ordinary_failure:
+        raise NoNewFootage("all YouTube footage candidates were already used")
     return None
 
 
@@ -337,6 +449,9 @@ def download_news_video(
     preferred_duration=60,
     pexels_api_key=None,
     preferred_orientation="portrait",
+    used_footage_urls: set[str] | None = None,
+    used_footage_hashes: set[str] | None = None,
+    selected_items: list[dict] | None = None,
 ):
     """
     Cari & download video berita dari berbagai sumber:
@@ -353,27 +468,53 @@ def download_news_video(
     # Grab a bit more than the target so the renderer has room to subclip.
     clip_seconds = int(preferred_duration) + 30
 
-    video_path = search_and_download_news_video(
-        title=title,
-        keywords=kw_list,
-        out_dir=out_dir,
-        min_duration=15,
-        max_duration=3600,
-        clip_seconds=clip_seconds,
-        source_url=source_url,
-    )
+    try:
+        video_path = search_and_download_news_video(
+            title=title,
+            keywords=kw_list,
+            out_dir=out_dir,
+            min_duration=15,
+            max_duration=3600,
+            clip_seconds=clip_seconds,
+            source_url=source_url,
+            audio_duration=preferred_duration,
+            used_footage_urls=used_footage_urls,
+            used_footage_hashes=used_footage_hashes,
+            selected_items=selected_items,
+        )
+    except NoNewFootage:
+        video_path = None
 
     if video_path:
         return [video_path]
 
     logger.info("YouTube tidak menghasilkan video, fallback ke Pexels...")
-    return download_pexels_footage(
+    pexels_paths = download_pexels_footage(
         keywords=kw_list or ["news", "headline"],
         count=3,
         out_dir=out_dir,
         preferred_orientation=preferred_orientation,
         api_key=pexels_api_key,
     )
+    used_hashes = set(used_footage_hashes or set())
+    retained = []
+    for video_path in pexels_paths:
+        digest = sha256_file(video_path)
+        if digest in used_hashes:
+            video_path.unlink(missing_ok=True)
+            continue
+        retained.append(video_path)
+        used_hashes.add(digest)
+        if selected_items is not None:
+            selected_items.append({
+                "provider": "pexels",
+                "url": "",
+                "file": str(video_path),
+                "sha256": digest,
+            })
+    if pexels_paths and not retained:
+        raise NoNewFootage("all Pexels footage candidates were already used")
+    return retained
 
 
 # Legacy alias — keep backwards compat
