@@ -69,7 +69,7 @@ class PipelineTest(TestCase):
                 "target_voice_duration_sec": 60,
                 "target_footage_count": 3,
                 "music_volume": 0.2,
-                "audio_mode": "music_only",
+                "audio_mode": "voiceover_only",
             },
             "upload": {"enabled": False},
             "scheduler": {"mode": "local", "time": "06:00", "tz": "Asia/Jakarta"},
@@ -125,5 +125,7 @@ class PipelineTest(TestCase):
         self.assertEqual((date_dir / "ig_caption.txt").read_text(encoding="utf-8").strip(), "Caption IG test")
         self.assertEqual(history["output_dir"], str(date_dir))
         self.assertIn("video_file", history)
-        self.assertEqual(render_video.call_args.kwargs["audio_mode"], "music_only")
+        self.assertEqual(render_video.call_args.kwargs["audio_mode"], "voiceover_only")
+        self.assertTrue(generate_voiceover.called)
+        self.assertGreater((date_dir / "voiceover.mp3").stat().st_size, 0)
         self.assertTrue(render_video.called)

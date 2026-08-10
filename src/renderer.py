@@ -650,15 +650,6 @@ def render_video(
     else:
         target_duration = int(duration)
 
-    # ---- Extract audio from footage ----
-    footage_audio = None
-    if footage_clip and footage_clip.audio:
-        try:
-            footage_audio = footage_clip.audio.subclipped(0, target_duration)
-            footage_audio = footage_audio.with_volume_scaled(1.0)
-        except Exception as exc:
-            logger.warning("Audio footage gagal: %s", exc)
-
     overlay_clips: list = []
 
     # ---- Layer 0: solid fallback background ----
@@ -772,15 +763,12 @@ def render_video(
     if composed.duration and composed.duration < target_duration:
         composed = composed.with_duration(target_duration)
 
-    # ---- Audio: prioritas YouTube footage, fallback voiceover+music ----
-    if footage_audio:
-        composed = composed.with_audio(footage_audio)
-    else:
-        audio = _mix_audio(
-            voiceover_path, music_path, target_duration, music_volume, audio_mode
-        )
-        if audio is not None:
-            composed = composed.with_audio(audio)
+    # ---- Audio mengikuti mode pipeline; audio footage tidak menimpa voiceover ----
+    audio = _mix_audio(
+        voiceover_path, music_path, target_duration, music_volume, audio_mode
+    )
+    if audio is not None:
+        composed = composed.with_audio(audio)
 
     fps = 30
     composed.write_videofile(

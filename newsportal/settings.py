@@ -1,13 +1,27 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env so DJANGO_* vars are available (same pattern as src/main.py)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "django-insecure-newsportal-local-dev-key"
-DEBUG = True
-ALLOWED_HOSTS = ["127.0.0.1", "localhost", "news.aipreneur.co.id", "31.97.66.119", "*"]
+# ponytail: env-driven; unset SECRET_KEY only tolerated in DEBUG. Prod must set it.
+DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("1", "true", "yes")
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or (
+    "django-insecure-local-dev-only" if DEBUG else ""
+)
+if not SECRET_KEY:
+    raise RuntimeError("DJANGO_SECRET_KEY must be set when DEBUG is off")
+ALLOWED_HOSTS = os.environ.get(
+    "DJANGO_ALLOWED_HOSTS",
+    "127.0.0.1,localhost,news.aipreneur.co.id,31.97.66.119",
+).split(",")
 
 
 INSTALLED_APPS = [
@@ -75,3 +89,16 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+
+# --- Security hardening (active when DEBUG is off) ---
+if not DEBUG:
+    # nginx terminates TLS and sets X-Forwarded-Proto=https
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    CSRF_TRUSTED_ORIGINS = ["https://news.aipreneur.co.id"]

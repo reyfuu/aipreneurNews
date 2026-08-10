@@ -10,7 +10,8 @@ from unittest import TestCase, mock, skipUnless
 import tempfile
 import shutil
 
-from moviepy import ColorClip
+import numpy as np
+from moviepy import AudioClip, ColorClip
 
 from src import renderer
 
@@ -23,6 +24,34 @@ def _make_clip(path: Path, seconds: float = 2.0) -> None:
         str(path), fps=12, codec="libx264", audio=False, logger=None,
         ffmpeg_params=["-pix_fmt", "yuv420p"],
     )
+
+
+def _make_silent_clip_with_audio(path: Path, seconds: float = 2.0) -> None:
+    def silence(t):
+        if np.isscalar(t):
+            return np.zeros(2)
+        return np.zeros((len(t), 2))
+
+    silent = AudioClip(silence, duration=seconds, fps=44100)
+    ColorClip((320, 240), color=(0, 200, 0)).with_duration(seconds).with_audio(silent).write_videofile(
+        str(path), fps=12, codec="libx264", audio_codec="aac", logger=None,
+        ffmpeg_params=["-pix_fmt", "yuv420p"],
+    )
+
+
+def _make_voiceover(path: Path, seconds: float = 2.0) -> None:
+    def sine(t):
+        wave = 0.4 * np.sin(2 * np.pi * 440 * t)
+        if np.isscalar(t):
+            return np.array([wave, wave])
+        return np.column_stack((wave, wave))
+
+    tone = AudioClip(
+        sine,
+        duration=seconds,
+        fps=44100,
+    )
+    tone.write_audiofile(str(path), fps=44100, codec="pcm_s16le", logger=None)
 
 
 def _stub_write(self, path, *args, **kwargs):
@@ -87,3 +116,30 @@ class RenderVideoSmokeTest(TestCase):
         # the no-footage baseline (fallback + template + gradient + bar + title + outro).
         self.assertTrue(captured.get("counts"))
         self.assertGreaterEqual(max(captured["counts"]), 6)
+
+    def test_voiceover_only_does_not_use_silent_footage_audio(self):
+        """A footage audio stream must not override an audible voiceover."""
+        footage = self.tmp / "silent-footage.mp4"
+        voiceover = self.tmp / "voiceover.wav"
+        _make_silent_clip_with_audio(footage, seconds=30)
+        _make_voiceover(voiceover)
+        captured = {}
+
+        def _capture_write(clip, path, *args, **kwargs):
+            captured["audio"] = clip.audio
+            Path(path).write_bytes(b"stub-video")
+
+        with mock.patch.object(renderer.CompositeVideoClip, "write_videofile", new=_capture_write):
+            renderer.render_video(
+                script={"title": "Judul"},
+                base_template=TEMPLATE,
+                voiceover_path=voiceover,
+                footage_paths=[footage],
+                music_path=None,
+                out_path=self.tmp / "voiceover.mp4",
+                audio_mode="voiceover_only",
+                duration=30,
+            )
+
+        sample = np.asarray(captured["audio"].get_frame(0.501))
+        self.assertGreater(float(np.max(np.abs(sample))), 0.01)
