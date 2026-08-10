@@ -316,7 +316,16 @@ def run_pipeline(
         source_name = news[source_idx].source
 
     youtube_id = None
-    if not skip_upload and settings.get("upload", {}).get("enabled", False):
+    should_upload = (
+        not skip_upload
+        and (
+            settings.get("upload", {}).get("enabled", False)
+            or os.getenv("YT_FORCE_UPLOAD", "").strip().lower()
+            in {"1", "true", "yes", "y"}
+        )
+    )
+
+    if should_upload:
         on_progress("Upload ke YouTube", "upload", 95)
         upload_cfg = settings["upload"]
         response = upload_to_youtube(

@@ -11,7 +11,7 @@
     "target_voice_duration_sec": 60,
     "target_footage_count": 3,
     "music_volume": 0.2,
-    "audio_mode": "music_only",
+    "audio_mode": "voiceover_only",
     "random_seed": 42
   },
   "upload": {
