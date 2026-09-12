@@ -190,36 +190,58 @@ def _clean_headline(text: str, max_len: int = 80) -> str:
     return f"{cut}…"
 
 
+NEWLINE = chr(10)
+
+
 def get_default_script(news_items: List[NewsItem], prompt_file: str) -> dict:
+    """Script cadangan saat LLM tidak tersedia.
+
+    Semua kalimat yang ditulis sendiri di sini berbahasa Indonesia. Judul dan
+    ringkasan aslinya tetap Inggris karena menerjemahkan butuh model bahasa;
+    field `language` menandai itu supaya jelas di dashboard dan history.
+    """
     if not news_items:
         raise AIWriterError("Tidak ada berita untuk dipilih.")
     chosen = news_items[0]
     headline = _clean_headline(chosen.title)
-    # Content description straight from the story, so the caption matches the video.
     summary = _clean_headline(chosen.summary, 220)
-    content_desc = summary or "Perkembangan terbaru di dunia kecerdasan buatan."
+    source = chosen.source
+
+    # Judul asli dipertahankan utuh: menerjemahkannya butuh LLM (lihat generate_script).
+    judul = headline
+    inti = summary or "Perkembangan terbaru di dunia kecerdasan buatan."
+    deskripsi_singkat = (
+        f"Kabar terbaru dari {source}. {inti} "
+        "Simak rangkumannya dalam video singkat ini."
+    )
+
     script = {
         "selected_index": 0,
-        "title": headline,
-        "description_text": (
-            f"{headline}. {content_desc}. "
-            "Perkembangan ini menunjukkan arah baru dalam industri AI."
-        ),
+        "title": judul,
+        "description_text": deskripsi_singkat,
         "hook": "Update AI terbaru yang perlu kamu tahu hari ini.",
-        "script_voiceover": f"Hai, update berita AI terbaru hari ini datang dari {chosen.source}. {chosen.title}. Simak info lengkapnya di video ini!",
-        "keywords": ["AI", "technology", chosen.source.lower()],
-        "thumbnail_text": "AI Update Hari Ini",
-        # YouTube/description: content first, then attribution + link.
-        "description": f"{content_desc}\n\nSumber: {chosen.source}\n{chosen.link}",
-        "tags": [chosen.source.lower(), "AI", "teknologi", "indonesia"],
+        "script_voiceover": (
+            f"Halo, ini kabar terbaru dunia kecerdasan buatan dari {source}. "
+            f"{inti} "
+            "Menarik, kan? Simak terus AIPreneur News untuk update AI setiap hari."
+        ),
+        "keywords": ["AI", "kecerdasan buatan", "teknologi", source.lower()],
+        "thumbnail_text": "Kabar AI Hari Ini",
+        "description": (
+            deskripsi_singkat
+            + f"{NEWLINE}{NEWLINE}Sumber: {source}{NEWLINE}{chosen.link}"
+            + f"{NEWLINE}{NEWLINE}#AI #KecerdasanBuatan #Teknologi"
+        ),
+        "tags": ["AI", "kecerdasan buatan", "teknologi", "indonesia", source.lower()],
         "source_url": chosen.link,
         "source_item": chosen.to_dict(),
+        "language": "id-fallback",
     }
     script["ig_caption"] = _format_ig_caption(
-        title=headline,
-        description=content_desc,
+        title=judul,
+        description=deskripsi_singkat,
         tags=script["tags"],
-        source=chosen.source,
+        source=source,
         link=chosen.link,
     )
     return script

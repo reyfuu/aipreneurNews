@@ -13,6 +13,32 @@ def _output_root() -> Path:
     return Path(settings.BASE_DIR) / "output"
 
 
+ALLOWED_OUTPUT_NAMES = {"script.json", "voiceover.mp3", "thumbnail.png", "ig_caption.txt"}
+ALLOWED_OUTPUT_SUFFIXES = {".mp4"}
+
+
+def resolve_output_file(folder: str, filename: str) -> Path | None:
+    """Resolve a request for output/<folder>/<filename> to a real file.
+
+    Nama video final di-slugify per berita, jadi semua *.mp4 di dalam folder
+    tanggal diizinkan; file lain harus cocok dengan nama baku.
+    """
+    if filename not in ALLOWED_OUTPUT_NAMES and Path(filename).suffix.lower() not in ALLOWED_OUTPUT_SUFFIXES:
+        return None
+
+    root = _output_root().resolve()
+    try:
+        candidate = (root / folder / filename).resolve()
+    except OSError:
+        return None
+    # Tolak path traversal: harus tepat satu level folder tanggal di bawah root.
+    if candidate.parent.parent != root:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -66,7 +92,13 @@ def _snapshot_jobs() -> list[dict]:
         return sorted(_jobs.values(), key=lambda item: item["created_at"], reverse=True)
 
 
-def start_pipeline_task(*, skip_upload: bool = False, run_date: str | None = None) -> str:
+def start_pipeline_task(
+    *,
+    skip_upload: bool = False,
+    skip_youtube: bool = False,
+    skip_instagram: bool = False,
+    run_date: str | None = None,
+) -> str:
     task_id = uuid.uuid4().hex
     job = {
         "task_id": task_id,
@@ -79,6 +111,8 @@ def start_pipeline_task(*, skip_upload: bool = False, run_date: str | None = Non
         "progress": 0,
         "updated_at": _now_iso(),
         "skip_upload": skip_upload,
+        "skip_youtube": skip_youtube,
+        "skip_instagram": skip_instagram,
         "run_date": run_date,
         "result": None,
         "error": None,
@@ -89,14 +123,26 @@ def start_pipeline_task(*, skip_upload: bool = False, run_date: str | None = Non
     thread = threading.Thread(
         target=_run_pipeline_task,
         args=(task_id,),
-        kwargs={"skip_upload": skip_upload, "run_date": run_date},
+        kwargs={
+            "skip_upload": skip_upload,
+            "skip_youtube": skip_youtube,
+            "skip_instagram": skip_instagram,
+            "run_date": run_date,
+        },
         daemon=True,
     )
     thread.start()
     return task_id
 
 
-def _run_pipeline_task(task_id: str, *, skip_upload: bool, run_date: Optional[str]) -> None:
+def _run_pipeline_task(
+    task_id: str,
+    *,
+    skip_upload: bool,
+    run_date: Optional[str],
+    skip_youtube: bool = False,
+    skip_instagram: bool = False,
+) -> None:
     def report_progress(message: str, phase: str, progress: int | None) -> None:
         _set_job_state(
             task_id,
@@ -113,7 +159,13 @@ def _run_pipeline_task(task_id: str, *, skip_upload: bool, run_date: Optional[st
     try:
         from src.main import run_pipeline
 
-        result = run_pipeline(skip_upload=skip_upload, run_date=run_date, on_progress=report_progress)
+        result = run_pipeline(
+            skip_upload=skip_upload,
+            skip_youtube=skip_youtube,
+            skip_instagram=skip_instagram,
+            run_date=run_date,
+            on_progress=report_progress,
+        )
         with _lock:
             now = _now_iso()
             _jobs[task_id]["status"] = "finished"

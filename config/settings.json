@@ -33,5 +33,13 @@
     "background_music_dir": "assets/background_music",
     "prompts_file": "config/prompts.txt",
     "feeds_file": "config/feeds.json"
+  },
+  "instagram": {
+    "enabled": false,
+    "share_to_feed": true,
+    "api_version": "v25.0",
+    "poll_interval_sec": 10,
+    "max_wait_sec": 300,
+    "public_base_url": ""
   }
 }

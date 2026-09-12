@@ -504,3 +504,202 @@ class PipelineTest(TestCase):
         generate_script.assert_not_called()
         render.assert_not_called()
         upload.assert_not_called()
+
+
+class PipelineInstagramTest(TestCase):
+    """Langkah publish Instagram dipasang setelah render, di belakang config flag."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="pipeline-ig-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _settings(self, output_dir, *, ig_enabled):
+        return {
+            "timezone": "Asia/Jakarta",
+            "feeds": {"window_hours_min": 6, "window_hours_max": 12, "feed_limit_per_source": 8, "max_items_for_ai": 5},
+            "pipeline": {"target_video_duration_sec": 60, "music_volume": 0.2, "audio_mode": "music_only"},
+            "upload": {"enabled": False},
+            "instagram": {
+                "enabled": ig_enabled,
+                "share_to_feed": True,
+                "public_base_url": "https://news.example.id",
+            },
+            "paths": {
+                "output_dir": str(output_dir), "template_video": "template.mp4",
+                "template_thumbnail": "thumbnail.png",
+                "background_music_dir": str(Path(self.tmpdir) / "music"),
+                "prompts_file": "config/prompts.txt", "feeds_file": "config/feeds.json",
+            },
+        }
+
+    def _run(
+        self,
+        *,
+        ig_enabled,
+        skip_upload=False,
+        skip_instagram=False,
+        publish_side_effect=None,
+    ):
+        output_dir = Path(self.tmpdir) / "output"
+        run_date = "2026-08-06T10:00:00"
+        with mock.patch("src.main.append_jsonl"), \
+             mock.patch("src.main.generate_voiceover"), \
+             mock.patch("src.main.render_thumbnail"), \
+             mock.patch("src.main.render_video"), \
+             mock.patch("src.main.upload_to_youtube"), \
+             mock.patch("src.main.download_news_video") as download_footage, \
+             mock.patch("src.main.scrape_recent_news") as scrape_news, \
+             mock.patch("src.main.generate_script") as generate_script, \
+             mock.patch("src.main.load_json") as load_json, \
+             mock.patch("src.main.publish_reel") as publish_reel:
+            load_json.return_value = self._settings(output_dir, ig_enabled=ig_enabled)
+            scrape_news.return_value = [
+                _NewsItem("Reuters", "A story", "Summary", "https://example/a",
+                          datetime.fromisoformat(run_date)),
+            ]
+            generate_script.return_value = {
+                "selected_index": 0, "title": "A story", "script_voiceover": "",
+                "keywords": ["ai"], "thumbnail_text": "A", "description": "Desc",
+                "tags": ["news"], "ig_caption": "Caption IG #ai",
+            }
+            download_footage.return_value = [Path(self.tmpdir) / "footage.mp4"]
+            publish_reel.return_value = {
+                "media_id": "MEDIA1", "container_id": "C1",
+                "permalink": "https://instagram.com/reel/x",
+            }
+            if publish_side_effect is not None:
+                publish_reel.side_effect = publish_side_effect
+            result = main.run_pipeline(
+                skip_upload=skip_upload,
+                skip_instagram=skip_instagram,
+                run_date=run_date,
+            )
+        return result, publish_reel
+
+    def test_publishes_when_enabled(self):
+        result, publish_reel = self._run(ig_enabled=True, skip_upload=False)
+        publish_reel.assert_called_once()
+        kwargs = publish_reel.call_args.kwargs
+        self.assertTrue(
+            kwargs["video_url"].startswith("https://news.example.id/api/outputs/2026-08-06/")
+        )
+        self.assertEqual(kwargs["caption"], "Caption IG #ai")
+        self.assertEqual(result["instagram_status"], "published")
+        self.assertEqual(result["instagram_media_id"], "MEDIA1")
+        self.assertEqual(result["instagram_permalink"], "https://instagram.com/reel/x")
+
+    def test_disabled_by_config(self):
+        result, publish_reel = self._run(ig_enabled=False, skip_upload=False)
+        publish_reel.assert_not_called()
+        self.assertEqual(result["instagram_status"], "skipped")
+
+    def test_skip_upload_also_skips_instagram(self):
+        result, publish_reel = self._run(ig_enabled=True, skip_upload=True)
+        publish_reel.assert_not_called()
+        self.assertEqual(result["instagram_status"], "skipped")
+
+    def test_skip_instagram_flag_skips_only_instagram(self):
+        result, publish_reel = self._run(ig_enabled=True, skip_instagram=True)
+        publish_reel.assert_not_called()
+        self.assertEqual(result["instagram_status"], "skipped")
+        # Video tetap dirender seperti biasa.
+        self.assertEqual(result["status"], "completed")
+
+    def test_failure_does_not_break_pipeline(self):
+        from src.publisher_instagram import InstagramPublishError
+
+        result, _ = self._run(
+            ig_enabled=True,
+            skip_upload=False,
+            publish_side_effect=InstagramPublishError("token kedaluwarsa"),
+        )
+        # Video tetap dianggap sukses; kegagalan IG hanya dicatat.
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["instagram_status"], "failed")
+        self.assertIn("token kedaluwarsa", result["instagram_error"])
+
+
+class SkipFlagRoutingTest(TestCase):
+    """--skip-youtube dan --skip-instagram hanya mematikan platformnya sendiri."""
+
+    def _run(self, **flags):
+        settings = {
+            "timezone": "Asia/Jakarta",
+            "feeds": {"window_hours_min": 6, "window_hours_max": 12, "feed_limit_per_source": 8, "max_items_for_ai": 5},
+            "pipeline": {"target_video_duration_sec": 60, "music_volume": 0.2, "audio_mode": "music_only"},
+            "upload": {"enabled": True},
+            "instagram": {"enabled": True, "public_base_url": "https://news.example.id"},
+            "paths": {
+                "output_dir": str(Path(self.tmpdir) / "output"), "template_video": "template.mp4",
+                "template_thumbnail": "thumbnail.png",
+                "background_music_dir": str(Path(self.tmpdir) / "music"),
+                "prompts_file": "config/prompts.txt", "feeds_file": "config/feeds.json",
+            },
+        }
+        run_date = "2026-08-06T10:00:00"
+        with mock.patch("src.main.append_jsonl"), \
+             mock.patch("src.main.generate_voiceover"), \
+             mock.patch("src.main.render_thumbnail"), \
+             mock.patch("src.main.render_video"), \
+             mock.patch("src.main.upload_to_youtube") as upload_yt, \
+             mock.patch("src.main.download_news_video") as download_footage, \
+             mock.patch("src.main.scrape_recent_news") as scrape_news, \
+             mock.patch("src.main.generate_script") as generate_script, \
+             mock.patch("src.main.load_json") as load_json, \
+             mock.patch("src.main.publish_reel") as publish_reel:
+            load_json.return_value = settings
+            scrape_news.return_value = [
+                _NewsItem("Reuters", "A story", "Summary", "https://example/a",
+                          datetime.fromisoformat(run_date)),
+            ]
+            generate_script.return_value = {
+                "selected_index": 0, "title": "A story", "script_voiceover": "",
+                "keywords": ["ai"], "thumbnail_text": "A", "description": "Desc",
+                "tags": ["news"], "ig_caption": "Caption",
+            }
+            download_footage.return_value = [Path(self.tmpdir) / "footage.mp4"]
+            upload_yt.return_value = {"id": "YT1"}
+            publish_reel.return_value = {"media_id": "IG1", "container_id": "C1", "permalink": None}
+            result = main.run_pipeline(run_date=run_date, **flags)
+        return result, upload_yt, publish_reel
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="skip-flags-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_no_flags_runs_both(self):
+        result, upload_yt, publish_reel = self._run()
+        upload_yt.assert_called_once()
+        publish_reel.assert_called_once()
+        self.assertEqual(result["upload_status"], "uploaded")
+        self.assertEqual(result["instagram_status"], "published")
+
+    def test_skip_youtube_keeps_instagram(self):
+        result, upload_yt, publish_reel = self._run(skip_youtube=True)
+        upload_yt.assert_not_called()
+        publish_reel.assert_called_once()
+        self.assertEqual(result["upload_status"], "skipped")
+        self.assertEqual(result["instagram_status"], "published")
+
+    def test_skip_instagram_keeps_youtube(self):
+        result, upload_yt, publish_reel = self._run(skip_instagram=True)
+        upload_yt.assert_called_once()
+        publish_reel.assert_not_called()
+        self.assertEqual(result["upload_status"], "uploaded")
+        self.assertEqual(result["instagram_status"], "skipped")
+
+    def test_skip_upload_is_master_switch(self):
+        result, upload_yt, publish_reel = self._run(skip_upload=True)
+        upload_yt.assert_not_called()
+        publish_reel.assert_not_called()
+        self.assertEqual(result["upload_status"], "skipped")
+        self.assertEqual(result["instagram_status"], "skipped")
+
+    def test_both_platform_flags_together(self):
+        _, upload_yt, publish_reel = self._run(skip_youtube=True, skip_instagram=True)
+        upload_yt.assert_not_called()
+        publish_reel.assert_not_called()

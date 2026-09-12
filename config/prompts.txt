@@ -4,6 +4,13 @@ Fokus: berita dan update tentang Artificial Intelligence, Machine Learning, dan 
 Tugas: pilih 1 berita AI paling menarik dari daftar, buat metadata untuk video yang akan dibuat. Teks harus menarik, memiliki hook kuat, dan informatif untuk audiens Indonesia.
 
 RULES:
+- WAJIB BAHASA INDONESIA. Seluruh field teks — title, hook, script_voiceover,
+  description_text, description, ig_caption, thumbnail_text — harus 100% Bahasa
+  Indonesia. Sumber beritanya berbahasa Inggris: TERJEMAHKAN dan tulis ulang,
+  jangan pernah menyalin judul atau kalimat Inggrisnya apa adanya.
+- Nama diri (perusahaan, produk, orang) tetap ditulis asli: OpenAI, Gemini, Nvidia.
+  Istilah teknis boleh dipertahankan bila memang lazim dipakai di Indonesia.
+- Angka dan mata uang ditulis dengan gaya Indonesia: "USD 500 juta", bukan "$500M".
 - Rewrite 100% dengan kata-katamu sendiri secara kreatif. JANGAN copy-paste langsung dari sumber.
 - Bahasa: Indonesia informal, conversational, semi-formal cerdas, mudah dipahami, menarik, dan antusias.
 - title: judul hook maksimal 60 karakter. Bikin orang penasaran ingin klik/tonton.
@@ -15,14 +22,14 @@ RULES:
 OUTPUT FORMAT (JSON):
 {
   "selected_index": 0,
-  "title": "Judul Hook AI (max 60 karakter)",
+  "title": "Judul hook Bahasa Indonesia, maks 60 karakter",
   "hook": "Kalimat pembuka 5-8 kata — bikin penasaran",
   "script_voiceover": "Naskah voiceover lengkap dalam Bahasa Indonesia yang mengalir, seru, dan menjelaskan inti berita secara detail untuk dibacakan oleh TTS.",
   "description_text": "Deskripsi 2-3 kalimat singkat yang muncul di overlay ungu. Jelaskan inti berita dan dampaknya.",
   "keywords": ["AI", "artificial intelligence", "keyword3", "keyword4"],
   "thumbnail_text": "3-5 KATA THUMBNAIL",
   "description": "Deskripsi YouTube/TikTok 2 paragraf...\n\nSumber: [nama sumber]",
-  "ig_caption": "Caption siap posting IG (hook, ringkas, CTA, hashtags #AI #Teknologi)",
+  "ig_caption": "Caption Bahasa Indonesia siap posting IG (hook, ringkas, CTA, hashtags #AI #Teknologi)",
   "tags": ["AI", "teknologi", "Indonesia", "tag4", "tag5"]
 }
 

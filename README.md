@@ -14,6 +14,7 @@ Sistem otomatis membuat 1 video berita internasional per hari (30–60 detik) da
 - Caption khusus IG tersimpan otomatis per hari
 - Generate thumbnail otomatis
 - Upload ke YouTube dengan metadata siap pakai
+- Auto-publish ke Instagram Reels (lihat `docs/instagram-setup.md`)
 - Scheduler lokal (`schedule`) atau GitHub Actions
 
 ## Struktur Proyek
@@ -63,7 +64,30 @@ news-clip-bot/
 - Jalankan scheduler lokal:
   - `python -m src.main --daemon`
 - Skip upload saat testing:
-  - `python -m src.main --run-once --skip-upload`
+  - `python -m src.main --run-once --skip-upload` (skip YouTube dan Instagram)
+  - `python -m src.main --run-once --skip-youtube` (YouTube saja yang dilewati)
+  - `python -m src.main --run-once --skip-instagram` (Instagram saja yang dilewati)
+
+## Bahasa output
+
+Judul, deskripsi, naskah voiceover, dan caption Instagram ditulis ulang ke Bahasa
+Indonesia oleh Claude. Aturannya ada di `config/prompts.txt`.
+
+**Ini butuh `ANTHROPIC_API_KEY` di `.env`.** Tanpa key itu pipeline memakai script
+cadangan lokal: kalimat yang ditulis sendiri sudah Bahasa Indonesia, tetapi judul
+dan ringkasan berita tetap berbahasa Inggris karena menerjemahkan butuh model
+bahasa. Script cadangan menandai dirinya dengan `"language": "id-fallback"` di
+`script.json`, dan log menulis peringatan `AI gagal (...), fallback script lokal dipakai`.
+
+## Auto-publish Instagram
+
+Instagram menarik video dari URL publik, jadi `PUBLIC_BASE_URL` wajib HTTPS dan
+bisa diakses dari internet. Langkah lengkap ada di [`docs/instagram-setup.md`](docs/instagram-setup.md).
+
+- Cek konfigurasi tanpa publish:
+  - `python -m src.publisher_instagram --date YYYY-MM-DD --dry-run`
+- Publish ulang satu output:
+  - `python -m src.publisher_instagram --date YYYY-MM-DD`
 
 ## Menjalankan tampilan web (Django + Vite)
 
@@ -79,7 +103,7 @@ news-clip-bot/
 - Jika backend Anda jalan di port selain `8000`, set environment variable saat jalankan Vite:
   - `DJANGO_HOST=127.0.0.1 DJANGO_PORT=8002 npm run dev`
 - Endpoint API yang dipakai UI:
-  - `POST /api/run/` → mulai pipeline (body opsional: `skip_upload`, `run_date`)
+  - `POST /api/run/` → mulai pipeline (body opsional: `skip_upload`, `skip_youtube`, `skip_instagram`, `run_date`)
   - `GET /api/task/<task_id>/` → status task
   - `GET /api/outputs/` → daftar output terbaru
   - `GET /api/outputs/<tanggal>/<filename>` → unduh file output (opsional)

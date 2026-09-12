@@ -19,6 +19,11 @@ from .scraper import scrape_recent_news
 from .footage import NoNewFootage, download_news_video
 from .thumbnail import render_thumbnail
 from .tts import generate_voiceover
+from .publisher_instagram import (
+    InstagramPublishError,
+    build_public_video_url,
+    publish_reel,
+)
 from .uploader import upload_to_youtube
 from .utils import append_jsonl, ensure_dir, load_json, now_local, now_utc, setup_logger, slugify, write_json
 
@@ -194,6 +199,8 @@ def _serialized_pipeline(func):
 def run_pipeline(
     *,
     skip_upload: bool = False,
+    skip_youtube: bool = False,
+    skip_instagram: bool = False,
     force_news: bool = False,
     run_date: str | None = None,
     on_progress: Callable[[str, str, int | None], None] | None = None,
@@ -354,6 +361,8 @@ def run_pipeline(
             template_path=template_thumb,
             out_path=thumb_path,
             font_path=settings["paths"].get("font_path"),
+            # Latar thumbnail diambil dari video yang baru dirender.
+            video_path=final_video,
         )
     except Exception as exc:
         logger.error("Thumbnail gagal: %s", exc)
@@ -364,7 +373,7 @@ def run_pipeline(
     youtube_id = None
     upload_status = "skipped"
     upload_error = None
-    if not skip_upload and settings.get("upload", {}).get("enabled", False):
+    if not skip_upload and not skip_youtube and settings.get("upload", {}).get("enabled", False):
         on_progress("Upload ke YouTube", "upload", 95)
         upload_cfg = settings["upload"]
         try:
@@ -384,6 +393,34 @@ def run_pipeline(
         except Exception as exc:
             logger.error("Upload YouTube gagal: %s", exc)
             upload_status, upload_error = "failed", str(exc)
+    instagram_status = "skipped"
+    instagram_media_id = None
+    instagram_permalink = None
+    instagram_error = None
+    ig_cfg = settings.get("instagram", {})
+    if not skip_upload and not skip_instagram and ig_cfg.get("enabled", False):
+        on_progress("Publish ke Instagram", "instagram", 97)
+        try:
+            base_url = os.getenv("PUBLIC_BASE_URL") or ig_cfg.get("public_base_url", "")
+            video_url = build_public_video_url(base_url, now.strftime("%Y-%m-%d"), final_video.name)
+            result = publish_reel(
+                video_url=video_url,
+                caption=script.get("ig_caption", ""),
+                share_to_feed=bool(ig_cfg.get("share_to_feed", True)),
+                api_version=ig_cfg.get("api_version", "v25.0"),
+                poll_interval=int(ig_cfg.get("poll_interval_sec", 10)),
+                max_wait_seconds=int(ig_cfg.get("max_wait_sec", 300)),
+            )
+            instagram_media_id = result["media_id"]
+            instagram_permalink = result["permalink"]
+            instagram_status = "published"
+        except InstagramPublishError as exc:
+            logger.error("Publish Instagram gagal: %s", exc)
+            instagram_status, instagram_error = "failed", str(exc)
+        except Exception as exc:  # jangan jatuhkan pipeline karena IG
+            logger.error("Publish Instagram gagal (tak terduga): %s", exc)
+            instagram_status, instagram_error = "failed", str(exc)
+
     on_progress("Menyimpan riwayat output", "finalizing", 98)
 
     history = {
@@ -404,7 +441,11 @@ def run_pipeline(
         "title": script.get("title"),
         "source": source_name,
         **({"thumbnail_error": thumbnail_error} if thumbnail_error else {}),
+        "instagram_status": instagram_status,
+        "instagram_media_id": instagram_media_id,
+        "instagram_permalink": instagram_permalink,
         **({"upload_error": upload_error} if upload_error else {}),
+        **({"instagram_error": instagram_error} if instagram_error else {}),
     }
     append_jsonl(history_path, history)
 
@@ -427,7 +468,13 @@ def run_scheduler() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Daily News Clip Automation")
-    parser.add_argument("--skip-upload", action="store_true", help="Skip upload YouTube")
+    parser.add_argument(
+        "--skip-upload", action="store_true", help="Skip semua upload (YouTube & Instagram)"
+    )
+    parser.add_argument("--skip-youtube", action="store_true", help="Skip upload YouTube saja")
+    parser.add_argument(
+        "--skip-instagram", action="store_true", help="Skip publish Instagram saja"
+    )
     parser.add_argument("--run-once", action="store_true", help="Run pipeline immediately")
     parser.add_argument("--run-date", help="Run as if date is YYYY-MM-DD")
     parser.add_argument("--daemon", action="store_true", help="Run scheduler loop")
@@ -439,7 +486,12 @@ def main() -> int:
 
     if args.run_once or not args.daemon:
         try:
-            run_pipeline(skip_upload=args.skip_upload, run_date=args.run_date)
+            run_pipeline(
+                skip_upload=args.skip_upload,
+                skip_youtube=args.skip_youtube,
+                skip_instagram=args.skip_instagram,
+                run_date=args.run_date,
+            )
             return 0
         except Exception as exc:
             logger.error("Pipeline gagal: %s", exc)
